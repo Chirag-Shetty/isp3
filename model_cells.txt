@@ -1,0 +1,186 @@
+﻿--- Cell 5 (code) ---
+from google.colab import drive
+import os, zipfile, subprocess, glob as glib
+
+# Mount Google Drive
+drive.mount('/content/drive')
+
+# =====================================================
+# Find the dataset zip in Drive
+# =====================================================
+zip_path = None
+
+# Common locations to check
+candidates = [
+    '/content/drive/MyDrive/dataset_26_09_25.zip',
+    '/content/drive/MyDrive/data_set_26_09_25.zip',
+]
+
+for c in candidates:
+    if os.path.isfile(c):
+        zip_path = c
+        break
+
+# If not found, search for it
+if zip_path is None:
+    print('Searching Drive for the zip file...')
+    result = subprocess.run(
+        ['find', '/content/drive/MyDrive', '-maxdepth', '3', '-name', '*dataset*26*09*25*.zip', '-type', 'f'],
+        capture_output=True, text=True, timeout=60
+    )
+    if result.stdout.strip():
+        found = result.stdout.strip().split('\n')
+        zip_path = found[0]
+        print(f'Found: {found}')
+    else:
+        # Try broader search
+        result2 = subprocess.run(
+            ['find', '/content/drive/MyDrive', '-maxdepth', '3', '-name', '*.zip', '-type', 'f'],
+            capture_output=True, text=True, timeout=60
+        )
+        if result2.stdout.strip():
+            zips = result2.stdout.strip().split('\n')
+            print(f'Found these zip files ΓÇö set zip_path to the correct one:')
+            for z in zips:
+                size_mb = os.path.getsize(z) / 1024 / 1024
+                print(f'  {z}  ({size_mb:.1f} MB)')
+            zip_path = zips[0]  # default to first one
+        else:
+            print('Γ¥î No zip files found in Drive. Upload and re-run.')
+
+if zip_path:
+    size_mb = os.path.getsize(zip_path) / 1024 / 1024
+    print(f'\nΓ£ô Using zip: {zip_path} ({size_mb:.1f} MB)')
+    print('Extracting... (this may take a minute)')
+    with zipfile.ZipFile(zip_path, 'r') as z:
+        z.extractall('/content/')
+    print('Γ£ô Extraction complete!')
+
+    # Find the actual dataset root (handles nested folders)
+    result = subprocess.run(
+        ['find', '/content', '-maxdepth', '5', '-type', 'd', '-name', 'Sitting_chair'],
+        capture_output=True, text=True, timeout=30
+    )
+    if result.stdout.strip():
+        sitting_dir = result.stdout.strip().split('\n')[0]
+        DATASET_ROOT = os.path.dirname(sitting_dir)
+        print(f'\nΓ£ô Dataset root: {DATASET_ROOT}')
+        print(f'  Classes: {sorted(os.listdir(DATASET_ROOT))}')
+    else:
+        print('\nΓÜá Could not find class folders. Listing extracted contents:')
+        !ls -la /content/
+        DATASET_ROOT = '/content/dataset_26_09_25/dataset_26_09_25'  # fallback
+
+--- Cell 9 (code) ---
+class RadarFallDataset(Dataset):
+    def __init__(self, windows, labels, scaler=None, augment=False):
+        self.augment = augment
+        X = np.array(windows, dtype=np.float32)
+        y = np.array(labels, dtype=np.int64)
+        N, W, F = X.shape
+
+        if scaler is None:
+            self.scaler = StandardScaler()
+            X_flat = X.reshape(-1, F)
+            X_flat = self.scaler.fit_transform(X_flat)
+            X = X_flat.reshape(N, W, F)
+        else:
+            self.scaler = scaler
+            X_flat = X.reshape(-1, F)
+            X_flat = self.scaler.transform(X_flat)
+            X = X_flat.reshape(N, W, F)
+
+        self.X = X.astype(np.float32)
+        self.y = y
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        x = self.X[idx]
+        if self.augment:
+            x = augment_window(x)
+        return torch.tensor(x, dtype=torch.float32), torch.tensor(self.y[idx], dtype=torch.long)
+
+print("Γ£ô Dataset class defined")
+
+--- Cell 13 (code) ---
+import math
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=200, dropout=0.1):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1), :]
+        return self.dropout(x)
+
+
+class AttentionPooling(nn.Module):
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.query = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        attn_weights = torch.softmax(self.query(x), dim=1)
+        return (attn_weights * x).sum(dim=1)
+
+
+class TransformerCNNLSTM(nn.Module):
+    def __init__(self, num_features=12, num_classes=6, d_model=64, nhead=4,
+                 num_encoder_layers=2, cnn_filters=128, cnn_kernel=3,
+                 lstm_hidden=128, dropout=0.4):
+        super().__init__()
+
+        self.input_proj = nn.Linear(num_features, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout=dropout * 0.5)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=d_model * 4,
+            dropout=dropout * 0.5, activation='gelu', batch_first=True, norm_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        self.transformer_norm = nn.LayerNorm(d_model)
+
+        self.cnn = nn.Sequential(
+            nn.Conv1d(d_model, cnn_filters, kernel_size=cnn_kernel, padding=cnn_kernel // 2),
+            nn.BatchNorm1d(cnn_filters), nn.GELU(),
+            nn.Conv1d(cnn_filters, cnn_filters, kernel_size=cnn_kernel, padding=cnn_kernel // 2),
+            nn.BatchNorm1d(cnn_filters), nn.GELU(),
+            nn.MaxPool1d(kernel_size=2),
+        )
+
+        self.lstm = nn.LSTM(input_size=cnn_filters, hidden_size=lstm_hidden,
+                           num_layers=2, batch_first=True, bidirectional=True,
+                           dropout=dropout * 0.5)
+
+        self.attention_pool = AttentionPooling(lstm_hidden * 2)
+
+        self.classifier = nn.Sequential(
+            nn.Dropout(dropout),
+            nn.Linear(lstm_hidden * 2, 128), nn.GELU(),
+            nn.Dropout(dropout * 0.5),
+            nn.Linear(128, num_classes),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for name, param in self.named_parameters():
+            if 'weight' in name and param.dim() >= 2:
+                if 'lstm' in name:
+                    nn.init.orthogonal_(param)
+                else:
+                    nn.init.kaiming_normal_(param, nonline
+

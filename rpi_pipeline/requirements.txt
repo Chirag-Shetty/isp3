@@ -1,0 +1,23 @@
+# Requirements for Raspberry Pi
+# Install with: pip install -r requirements.txt
+
+# Radar serial communication
+pyserial>=3.5
+
+# Numerical computing (feature extraction)
+numpy>=1.21
+
+# HTTP requests to Supabase REST API
+requests>=2.28
+
+# ML inference (if running model on RPi)
+# Note: Installing PyTorch on RPi — use the ARM wheel:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+
+# Supabase Python client (optional — we use raw requests above, but useful for Realtime)
+# supabase>=2.0
+# pip install supabase
+
+# scikit-learn for the StandardScaler (used to load scaler.pkl)
+scikit-learn>=1.0

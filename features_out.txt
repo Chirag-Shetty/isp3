@@ -1,0 +1,494 @@
+﻿--- Cell 7 ---
+import os
+import json
+import glob
+import numpy as np
+import torch
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+import pickle
+import warnings
+warnings.filterwarnings("ignore")
+
+# ---- Constants ----
+CLASSES = [
+    "stand_floor_transition",      # 0 ΓÇö fall
+    "chair_floor_transition",      # 1 ΓÇö fall
+    "Sitting_chair",               # 2 ΓÇö non-fall
+    "Standing_walk",               # 3 ΓÇö non-fall
+    "sitting_floor",               # 4 ΓÇö non-fall
+    "Stand_Sit_chair_transition",  # 5 ΓÇö non-fall
+]
+FALL_CLASSES = {0, 1}
+NON_FALL_CLASSES = {2, 3, 4, 5}
+WINDOW_SIZE = 40
+STRIDE = 5
+SNR_THRESHOLD = 10.0
+NUM_FEATURES = 12
+FRAME_DT = 0.055
+
+print(f"Classes: {CLASSES}")
+print(f"Fall classes: {[CLASSES[i] for i in FALL_CLASSES]}")
+print(f"Window: {WINDOW_SIZE} frames, Stride: {STRIDE}")
+
+--- Cell 8 ---
+def extract_frame_features(point_cloud, prev_velocity=None):
+    """Extract 12-dim feature vector from a single radar frame."""
+    if not point_cloud or len(point_cloud) == 0:
+        feat = np.zeros(NUM_FEATURES, dtype=np.float32)
+        return feat, np.zeros(3, dtype=np.float32)
+
+    pts = np.array(point_cloud, dtype=np.float32)
+
+    # SNR filter (column 4)
+    if pts.shape[1] > 4:
+        snr_mask = pts[:, 4] >= SNR_THRESHOLD
+        if snr_mask.sum() > 0:
+            pts = pts[snr_mask]
+
+    n_points = len(pts)
+    x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+    doppler = pts[:, 3] if pts.shape[1] > 3 else np.zeros(n_points)
+
+    # Centroid
+    x_mean, y_mean, z_mean = x.mean(), y.mean(), z.mean()
+
+    # Velocity decomposition from radial Doppler
+    r = np.sqrt(x_mean**2 + y_mean**2 + z_mean**2) + 1e-8
+    vx_mean = doppler.mean() * (x_mean / r)
+    vy_mean = doppler.mean() * (y_mean / r)
+    vz_mean = doppler.mean() * (z_mean / r)
+
+    current_velocity = np.array([vx_mean, vy_mean, vz_mean], dtype=np.float32)
+
+    # Acceleration
+    acc = (current_velocity - prev_velocity) / FRAME_DT if prev_velocity is not None else np.zeros(3, dtype=np.float32)
+
+    # Point statistics
+    spread_xy = np.sqrt(x.var() + y.var()) if n_points > 1 else 0.0
+    height_range = z.max() - z.min() if n_points > 1 else 0.0
+
+    feat = np.array([
+        x_mean, y_mean, z_mean,
+        vx_mean, vy_mean, vz_mean,
+        acc[0], acc[1], acc[2],
+        float(n_points), spread_xy, height_range
+    ], dtype=np.float32)
+
+    return feat, current_velocity
+
+
+def extract_recording_features(frames):
+    """Process all frames in a recording ΓåÆ (T, 12) array."""
+    features = []
+    prev_vel = None
+    for frame_obj in frames:
+        fd = frame_obj.get("frameData", frame_obj)
+        pc = fd.get("pointCloud", [])
+        feat, prev_vel = extract_frame_features(pc, prev_vel)
+        features.append(feat)
+    return np.array(features, dtype=np.float32)
+
+
+def create_windows(features, label, window_
+
+--- Cell 9 ---
+class RadarFallDataset(Dataset):
+    def __init__(self, windows, labels, scaler=None, augment=False):
+        self.augment = augment
+        X = np.array(windows, dtype=np.float32)
+        y = np.array(labels, dtype=np.int64)
+        N, W, F = X.shape
+
+        if scaler is None:
+            self.scaler = StandardScaler()
+            X_flat = X.reshape(-1, F)
+            X_flat = self.scaler.fit_transform(X_flat)
+            X = X_flat.reshape(N, W, F)
+        else:
+            self.scaler = scaler
+            X_flat = X.reshape(-1, F)
+            X_flat = self.scaler.transform(X_flat)
+            X = X_flat.reshape(N, W, F)
+
+        self.X = X.astype(np.float32)
+        self.y = y
+
+    def __len__(self):
+        return len(self.y)
+
+    def __getitem__(self, idx):
+        x = self.X[idx]
+        if self.augment:
+            x = augment_window(x)
+        return torch.tensor(x, dtype=torch.float32), torch.tensor(self.y[idx], dtype=torch.long)
+
+print("Γ£ô Dataset class defined")
+
+--- Cell 10 ---
+# ===== LOAD ALL DATA =====
+
+all_windows = []
+all_labels = []
+class_counts = {}
+
+for label_idx, class_name in enumerate(CLASSES):
+    class_dir = os.path.join(DATASET_ROOT, class_name)
+    if not os.path.isdir(class_dir):
+        print(f"  [WARN] Not found: {class_dir}")
+        continue
+
+    json_files = sorted(glob.glob(os.path.join(class_dir, "*.json")))
+    class_counts[class_name] = 0
+
+    for jf in json_files:
+        try:
+            with open(jf, 'r') as f:
+                recording = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            continue
+
+        frames = recording.get("data", [])
+        if len(frames) < 5:
+            continue
+
+        features = extract_recording_features(frames)
+        windows = create_windows(features, label_idx)
+
+        for w, l in windows:
+            all_windows.append(w)
+            all_labels.append(l)
+            class_counts[class_name] += 1
+
+print(f"\n{'='*50}")
+print(f"Dataset Summary")
+print(f"{'='*50}")
+for cls, cnt in class_counts.items():
+    print(f"  {cls:35s}: {cnt:6d} windows")
+print(f"  {'TOTAL':35s}: {sum(class_counts.values()):6d} windows")
+print(f"{'='*50}")
+
+--- Cell 11 ---
+# ===== TRAIN / VAL / TEST SPLIT =====
+
+windows_arr = np.array(all_windows, dtype=np.float32)
+labels_arr = np.array(all_labels, dtype=np.int64)
+
+X_train, X_temp, y_train, y_temp = train_test_split(
+    windows_arr, labels_arr, test_size=0.30, stratify=labels_arr, random_state=42
+)
+X_val, X_test, y_val, y_test = train_test_split(
+    X_temp, y_temp, test_size=0.50, stratify=y_temp, random_state=42
+)
+
+print(f"Train: {len(y_train)}, Val: {len(y_val)}, Test: {len(y_test)}")
+
+# Build datasets
+train_ds = RadarFallDataset(X_train, y_train, scaler=None, augment=True)
+val_ds = RadarFallDataset(X_val, y_val, scaler=train_ds.scaler, augment=False)
+test_ds = RadarFallDataset(X_test, y_test, scaler=train_ds.scaler, augment=False)
+
+# Class weights
+unique, counts = np.unique(y_train, return_counts=True)
+total = counts.sum()
+class_weights = torch.tensor([total / (len(unique) * c) for c in counts], dtype=torch.float32)
+print(f"Class weights: {[f'{w:.3f}' for w in class_weights.tolist()]}")
+
+# Weighted sampler
+sample_weights = class_weights[y_train]
+sampler = WeightedRandomSampler(sample_weights.tolist(), len(y_train), replacement=True)
+
+BATCH_SIZE = 64
+train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, sampler=sampler, num_workers=2, pin_memory=True)
+val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+
+# Save scaler
+with open('/content/scaler.pkl', 'wb') as f:
+    pickle.dump(train_ds.scaler, f)
+
+# Quick sanity check
+for X_batch, y_batch in train_loader:
+    print(f"\nBatch shapes: X={X_batch.shape}, y={y_batch.shape}")
+    print(f"Labels in batch: {y_batch.unique().tolist()}")
+    break
+
+print("\nΓ£ô Data pipeline ready")
+
+--- Cell 13 ---
+import math
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=200, dropout=0.1):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float32).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2, dtype=torch.float32) * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1), :]
+        return self.dropout(x)
+
+
+class AttentionPooling(nn.Module):
+    def __init__(self, hidden_dim):
+        super().__init__()
+        self.query = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        attn_weights = torch.softmax(self.query(x), dim=1)
+        return (attn_weights * x).sum(dim=1)
+
+
+class TransformerCNNLSTM(nn.Module):
+    def __init__(self, num_features=12, num_classes=6, d_model=64, nhead=4,
+                 num_encoder_layers=2, cnn_filters=128, cnn_kernel=3,
+                 lstm_hidden=128, dropout=0.4):
+        super().__init__()
+
+        self.input_proj = nn.Linear(num_features, d_model)
+        self.pos_encoder = PositionalEncoding(d_model, dropout=dropout * 0.5)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=nhead, dim_feedforward=d_model * 4,
+            dropout=dropout * 0.5, activation='gelu', batch_first=True, norm_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        self.transformer_norm = nn.LayerNorm(d_model)
+
+        self.cnn = nn.Sequential(
+            nn.Conv1d(d_model, cnn_filters, kernel_size=cnn_kernel, padding=cnn_kernel // 2),
+            nn.BatchNorm1d(cnn_filters), nn.GELU(),
+            nn.Conv1d(
+
+--- Cell 15 ---
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
+import time
+
+# ---- Training functions ----
+def train_epoch(model, loader, criterion, optimizer, device):
+    model.train()
+    total_loss, correct, total = 0.0, 0, 0
+    for X_batch, y_batch in loader:
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+        optimizer.zero_grad()
+        logits = model(X_batch)
+        loss = criterion(logits, y_batch)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        total_loss += loss.item() * X_batch.size(0)
+        correct += (logits.argmax(1) == y_batch).sum().item()
+        total += y_batch.size(0)
+    return total_loss / total, correct / total
+
+
+@torch.no_grad()
+def evaluate(model, loader, criterion, device):
+    model.eval()
+    total_loss, correct, total = 0.0, 0, 0
+    all_preds, all_labels = [], []
+    for X_batch, y_batch in loader:
+        X_batch, y_batch = X_batch.to(device), y_batch.to(device)
+        logits = model(X_batch)
+        loss = criterion(logits, y_batch)
+        total_loss += loss.item() * X_batch.size(0)
+        preds = logits.argmax(1)
+        correct += (preds == y_batch).sum().item()
+        total += y_batch.size(0)
+        all_preds.extend(preds.cpu().numpy())
+        all_labels.extend(y_batch.cpu().numpy())
+    return total_loss / total, correct / total, np.array(all_preds), np.array(all_labels)
+
+print("Γ£ô Training functions defined")
+
+--- Cell 16 ---
+# ===== TRAINING LOOP =====
+
+EPOCHS = 150
+LR = 1e-3
+PATIENCE = 15
+
+criterion = nn.CrossEntropyLoss(weight=class_weights.to(DEVICE), label_smoothing=0.05)
+optimizer = AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
+scheduler = CosineAnnealingLR(optimizer, T_max=EPOCHS, eta_min=1e-6)
+
+best_val_acc = 0.0
+patience_counter = 0
+history = {'train_loss': [], 'train_acc': [], 'val_loss': [], 'val_acc': []}
+
+print(f"{'Epoch':>6} | {'Train Loss':>10} | {'Train Acc':>9} | {'Val Loss':>10} | {'Val Acc':>8} | {'LR':>10}")
+print("-" * 75)
+
+start_time = time.time()
+
+for epoch in range(1, EPOCHS + 1):
+    train_loss, train_acc = train_epoch(model, train_loader, criterion, optimizer, DEVICE)
+    val_loss, val_acc, _, _ = evaluate(model, val_loader, criterion, DEVICE)
+    scheduler.step()
+
+    history['train_loss'].append(train_loss)
+    history['train_acc'].append(train_acc)
+    history['val_loss'].append(val_loss)
+    history['val_acc'].append(val_acc)
+
+    lr = optimizer.param_groups[0]['lr']
+    print(f"{epoch:6d} | {train_loss:10.4f} | {train_acc:8.2%} | {val_loss:10.4f} | {val_acc:7.2%} | {lr:10.6f}", end="")
+
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        patience_counter = 0
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_acc': val_acc,
+        }, '/content/best_model.pth')
+        print(f"  Γÿà Best")
+    else:
+        patience_counter += 1
+        print()
+
+    if patience_counter >= PATIENCE:
+        print(f"\nEarly stopping at epoch {epoch}")
+        break
+
+elapsed = time.time() - start_time
+print(f"\nTraining complete in {elapsed:.1f}s")
+print(f"Best validation accuracy: {best_val_acc:.4%}")
+
+--- Cell 18 ---
+import matplotlib.pyplot as plt
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+ax1.plot(history['train_loss'], label='Train Loss', color='#2196F3')
+ax1.plot(history['val_loss'], label='Val Loss', color='#FF5722')
+ax1.set_xlabel('Epoch'); ax1.set_ylabel('Loss')
+ax1.set_title('Loss Curves'); ax1.legend(); ax1.grid(True, alpha=0.3)
+
+ax2.plot([a*100 for a in history['train_acc']], label='Train Acc', color='#2196F3')
+ax2.plot([a*100 for a in history['val_acc']], label='Val Acc', color='#FF5722')
+ax2.axhline(y=99.65, color='green', linestyle='--', alpha=0.7, label='Paper Baseline (99.65%)')
+ax2.set_xlabel('Epoch'); ax2.set_ylabel('Accuracy (%)')
+ax2.set_title('Accuracy Curves'); ax2.legend(); ax2.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.savefig('/content/training_curves.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+--- Cell 20 ---
+# Load best model
+checkpoint = torch.load('/content/best_model.pth', map_location=DEVICE, weights_only=True)
+model.load_state_dict(checkpoint['model_state_dict'])
+print(f"Loaded best model from epoch {checkpoint['epoch']} (val_acc={checkpoint['val_acc']:.4%})")
+
+# Evaluate on test set
+test_loss, test_acc, test_preds, test_labels = evaluate(model, test_loader, criterion, DEVICE)
+
+print(f"\n{'='*60}")
+print(f"  FINAL TEST RESULTS ΓÇö 6-CLASS")
+print(f"{'='*60}")
+print(f"\nTest Accuracy: {test_acc:.4%}")
+print(f"\nClassification Report:")
+print(classification_report(test_labels, test_preds, target_names=CLASSES, digits=4))
+
+--- Cell 21 ---
+# Confusion Matrix Visualization
+import seaborn as sns
+
+cm = confusion_matrix(test_labels, test_preds)
+cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(18, 7))
+
+short_names = ['standΓåÆfloor', 'chairΓåÆfloor', 'sit_chair', 'walk', 'sit_floor', 'standΓåÆsit']
+
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=short_names,
+            yticklabels=short_names, ax=ax1)
+ax1.set_title('Confusion Matrix (Counts)', fontsize=14)
+ax1.set_ylabel('True Label'); ax1.set_xlabel('Predicted Label')
+
+sns.heatmap(cm_norm, annot=True, fmt='.2%', cmap='Greens', xticklabels=short_names,
+            yticklabels=short_names, ax=ax2)
+ax2.set_title('Confusion Matrix (Normalized)', fontsize=14)
+ax2.set_ylabel('True Label'); ax2.set_xlabel('Predicted Label')
+
+plt.tight_layout()
+plt.savefig('/content/confusion_matrix.png', dpi=150, bbox_inches='tight')
+plt.show()
+
+--- Cell 22 ---
+# ===== PAPER COMPARISON ΓÇö Binary Fall vs Non-Fall =====
+
+binary_preds = np.array([0 if p in FALL_CLASSES else 1 for p in test_preds])
+binary_labels = np.array([0 if l in FALL_CLASSES else 1 for l in test_labels])
+
+binary_acc = accuracy_score(binary_labels, binary_preds)
+binary_f1 = f1_score(binary_labels, binary_preds, average='binary', pos_label=0)
+
+print(f"{'='*60}")
+print(f"  PAPER COMPARISON ΓÇö Binary: Fall vs Non-Fall")
+print(f"{'='*60}")
+print(f"                        Ours        Paper")
+print(f"  Binary Accuracy:   {binary_acc:8.4%}     99.65%")
+print(f"  Binary F1-Score:   {binary_f1:8.4%}     98.30%")
+print(f"  6-Class Accuracy:  {test_acc:8.4%}     N/A")
+print(f"{'='*60}")
+
+if binary_acc > 0.9965:
+    print("\n≡ƒÄë EXCEEDED paper's validation accuracy!")
+if binary_f1 > 0.983:
+    print("≡ƒÄë EXCEEDED paper's F1-score!")
+
+--- Cell 26 ---
+# Quick inference test on a few recordings from each class
+from collections import Counter
+
+model.eval()
+results_summary = []
+
+for cls_idx, cls_name in enumerate(CLASSES):
+    class_dir = os.path.join(DATASET_ROOT, cls_name)
+    json_files = sorted(glob.glob(os.path.join(class_dir, "*.json")))[:3]
+
+    for jf in json_files:
+        with open(jf, 'r') as f:
+            recording = json.load(f)
+
+        frames = recording.get("data", [])
+        features = extract_recording_features(frames)
+
+        if len(features) < WINDOW_SIZE:
+            continue
+
+        # Take windows
+        preds_for_file = []
+        for start in range(0, len(features) - WINDOW_SIZE + 1, STRIDE):
+            window = features[start:start + WINDOW_SIZE]
+            window_norm = train_ds.scaler.transform(window.reshape(-1, NUM_FEATURES)).reshape(1, WINDOW_SIZE, NUM_FEATURES)
+            x_t = torch.tensor(window_norm, dtype=torch.float32).to(DEVICE)
+            with torch.no_grad():
+                probs = model.predict_proba(x_t)[0].cpu().numpy()
+            preds_for_file.append(CLASSES[probs.argmax()])
+
+        most_common = Counter(preds_for_file).most_common(1)[0]
+        correct = most_common[0] == cls_name
+        results_summary.append(correct)
+        status = 'Γ£ô' if correct else 'Γ£ù'
+        print(f"  {status} {os.path.basename(jf):20s} | True: {cls_name:30s} | Pred: {most_common[0]:30s} ({most_common[1]}/{len(preds_for_file)})")
+
+overall = sum(results_summary) / len(results_summary) * 100
+print(f"\nInference accuracy: {overall:.1f}% ({sum(results_summary)}/{len(results_summary)} files correct)")
+

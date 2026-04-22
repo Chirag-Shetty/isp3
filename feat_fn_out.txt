@@ -1,0 +1,88 @@
+﻿--- Cell 8 ---
+def extract_frame_features(point_cloud, prev_velocity=None):
+    """Extract 12-dim feature vector from a single radar frame."""
+    if not point_cloud or len(point_cloud) == 0:
+        feat = np.zeros(NUM_FEATURES, dtype=np.float32)
+        return feat, np.zeros(3, dtype=np.float32)
+
+    pts = np.array(point_cloud, dtype=np.float32)
+
+    # SNR filter (column 4)
+    if pts.shape[1] > 4:
+        snr_mask = pts[:, 4] >= SNR_THRESHOLD
+        if snr_mask.sum() > 0:
+            pts = pts[snr_mask]
+
+    n_points = len(pts)
+    x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+    doppler = pts[:, 3] if pts.shape[1] > 3 else np.zeros(n_points)
+
+    # Centroid
+    x_mean, y_mean, z_mean = x.mean(), y.mean(), z.mean()
+
+    # Velocity decomposition from radial Doppler
+    r = np.sqrt(x_mean**2 + y_mean**2 + z_mean**2) + 1e-8
+    vx_mean = doppler.mean() * (x_mean / r)
+    vy_mean = doppler.mean() * (y_mean / r)
+    vz_mean = doppler.mean() * (z_mean / r)
+
+    current_velocity = np.array([vx_mean, vy_mean, vz_mean], dtype=np.float32)
+
+    # Acceleration
+    acc = (current_velocity - prev_velocity) / FRAME_DT if prev_velocity is not None else np.zeros(3, dtype=np.float32)
+
+    # Point statistics
+    spread_xy = np.sqrt(x.var() + y.var()) if n_points > 1 else 0.0
+    height_range = z.max() - z.min() if n_points > 1 else 0.0
+
+    feat = np.array([
+        x_mean, y_mean, z_mean,
+        vx_mean, vy_mean, vz_mean,
+        acc[0], acc[1], acc[2],
+        float(n_points), spread_xy, height_range
+    ], dtype=np.float32)
+
+    return feat, current_velocity
+
+
+def extract_recording_features(frames):
+    """Process all frames in a recording ΓåÆ (T, 12) array."""
+    features = []
+    prev_vel = None
+    for frame_obj in frames:
+        fd = frame_obj.get("frameData", frame_obj)
+        pc = fd.get("pointCloud", [])
+        feat, prev_vel = extract_frame_features(pc, prev_vel)
+        features.append(feat)
+    return np.array(features, dtype=np.float32)
+
+
+def create_windows(features, label, window_size=WINDOW_SIZE, stride=STRIDE):
+    """Sliding window over a recording."""
+    T = len(features)
+    samples = []
+    if T < window_size:
+        padded = np.zeros((window_size, features.shape[1]), dtype=np.float32)
+        padded[window_size - T:] = features
+        samples.append((padded, label))
+    else:
+        for start in range(0, T - window_size + 1, stride):
+            window = features[start:start + window_size]
+            samples.append((window, label))
+    return samples
+
+
+def augment_window(window, noise_std=0.02, time_warp_prob=0.3):
+    """Gaussian noise + time warping augmentation."""
+    aug = window.copy()
+    aug += np.random.randn(*aug.shape).astype(np.float32) * noise_std
+
+    if np.random.rand() < time_warp_prob:
+        T = aug.shape[0]
+        warp_factor = np.random.uniform(0.8, 1.2)
+        new_len = int(T * warp_factor)
+        if new_len > 2:
+            indices = np.linspace(0, T - 1, new_len).astype(int)
+            warped = aug[indices]
+            if
+
