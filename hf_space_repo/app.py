@@ -14,6 +14,7 @@ import pickle
 import numpy as np
 import torch
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import List
 
@@ -80,6 +81,12 @@ app = FastAPI(
     description="Transformer-CNN-LSTM model for IWR6843 radar activity recognition (6 classes)",
     version="2.0.0",
 )
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """Redirect base URL to interactive API docs."""
+    return RedirectResponse(url="/docs")
 
 
 class PredictRequest(BaseModel):
