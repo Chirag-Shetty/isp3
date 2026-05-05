@@ -1,103 +1,78 @@
 """
 feature_extract.py
 ------------------
-Extracts the exact same 20-dimensional feature vector used during
-binary fall detection training (run_fall_detection.py).
-
-Features [0-11]: Point cloud statistics
-  0: x_mean         - centroid x
-  1: y_mean         - centroid y
-  2: z_mean         - centroid z
-  3: vx_angular     - mean(doppler * sin(azimuth))
-  4: vy_angular     - mean(doppler * cos(azimuth))
-  5: vz_angular     - mean(doppler * sin(elevation))
-  6: ax             - frame-to-frame delta of feat[3] / FRAME_DT
-  7: ay             - frame-to-frame delta of feat[4] / FRAME_DT
-  8: az             - frame-to-frame delta of feat[5] / FRAME_DT
-  9: n_points       - number of points passing SNR filter
-  10: spread_xy     - sqrt(var(x) + var(y))
-  11: height_range  - max(z) - min(z)
-
-Features [12-17]: Tracker output (track x,y,z,vx,vy,vz)
-Features [18-19]: HeightData (maxZ, minZ)
-
-IMPORTANT: Send RAW (unscaled) features to the cloud API.
-           The API applies the StandardScaler internally.
+Extracts the same 20-dimensional feature vector used during training.
+Mirrors the logic from the Google Colab notebook exactly.
 """
 
 import numpy as np
-from config import SNR_THRESHOLD, FRAME_DT
+from config import SNR_THRESHOLD, NUM_FEATURES, FRAME_DT
 
 
-def extract_frame_features(point_cloud, track_data, height_data, prev_feat=None):
+def extract_frame_features(point_cloud, track_data, height_data, prev_velocity=None):
     """
     Extract 20-dim feature vector from a single radar frame.
 
-    Args:
-        point_cloud : list of [x, y, z, doppler, snr, ...]
-        track_data  : list of tracker rows [trackId, x, y, z, vx, vy, vz, ...]
-        height_data : list of height rows  [trackId, maxZ, minZ, ...]
-        prev_feat   : previous frame's feature vector (np.ndarray shape 20),
-                      used for acceleration (feats 6-8). Pass None for first frame.
-
-    Returns:
-        feat          : np.ndarray shape (20,) — raw unscaled features
-        feat          : same array (returned twice for API compat with old callers
-                        that did:  feat, prev_vel = extract_frame_features(...))
+    Features:
+      0-11: PointCloud (x, y, z, vx, vy, vz, ax, ay, az, n_points, spread_xy, height_range)
+      12-17: TrackData (track_x, track_y, track_z, track_vx, track_vy, track_vz)
+      18-19: HeightData (person_height, bottom_height)
     """
-    pts = np.array(point_cloud, dtype=np.float32) if point_cloud else np.empty((0, 5))
+    # 1) Point Cloud Features (12)
+    if not point_cloud or len(point_cloud) == 0:
+        pc_feat = np.zeros(12, dtype=np.float32)
+        current_velocity = np.zeros(3, dtype=np.float32)
+    else:
+        pts = np.array(point_cloud, dtype=np.float32)
+        if pts.shape[1] > 4:
+            snr_mask = pts[:, 4] >= SNR_THRESHOLD
+            if snr_mask.sum() > 0:
+                pts = pts[snr_mask]
 
-    # Apply SNR filter if SNR column exists
-    if pts.ndim == 2 and pts.shape[1] > 4:
-        mask = pts[:, 4] >= SNR_THRESHOLD
-        pts = pts[mask]
+        n_points = len(pts)
+        if n_points == 0:
+            pc_feat = np.zeros(12, dtype=np.float32)
+            current_velocity = np.zeros(3, dtype=np.float32)
+        else:
+            x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+            doppler = pts[:, 3] if pts.shape[1] > 3 else np.zeros(n_points)
 
-    feat = np.zeros(20, dtype=np.float32)
+            x_mean, y_mean, z_mean = x.mean(), y.mean(), z.mean()
+            r = np.sqrt(x_mean**2 + y_mean**2 + z_mean**2) + 1e-8
+            vx_mean = doppler.mean() * (x_mean / r)
+            vy_mean = doppler.mean() * (y_mean / r)
+            vz_mean = doppler.mean() * (z_mean / r)
+            current_velocity = np.array([vx_mean, vy_mean, vz_mean], dtype=np.float32)
 
-    if len(pts) > 0:
-        # ── Centroid ──────────────────────────────────────────────────────────
-        feat[0] = np.mean(pts[:, 0])   # x_mean
-        feat[1] = np.mean(pts[:, 1])   # y_mean
-        feat[2] = np.mean(pts[:, 2])   # z_mean
+            acc = (current_velocity - prev_velocity) / FRAME_DT if prev_velocity is not None else np.zeros(3, dtype=np.float32)
 
-        # ── Angular velocity decomposition (MATCHES TRAINING EXACTLY) ─────────
-        angles = np.arctan2(pts[:, 0], pts[:, 1])            # azimuth
-        elev   = np.arctan2(pts[:, 2],
-                            np.sqrt(pts[:, 0]**2 + pts[:, 1]**2))  # elevation
-        doppler = pts[:, 3]
+            spread_xy = float(np.sqrt(x.var() + y.var())) if n_points > 1 else 0.0
+            height_range = float(z.max() - z.min()) if n_points > 1 else 0.0
 
-        feat[3] = np.mean(doppler * np.sin(angles))   # vx_angular
-        feat[4] = np.mean(doppler * np.cos(angles))   # vy_angular
-        feat[5] = np.mean(doppler * np.sin(elev))     # vz_angular
+            pc_feat = np.array([
+                x_mean, y_mean, z_mean,
+                vx_mean, vy_mean, vz_mean,
+                acc[0], acc[1], acc[2],
+                float(n_points), spread_xy, height_range
+            ], dtype=np.float32)
 
-        # ── Acceleration (delta from previous frame) ──────────────────────────
-        if prev_feat is not None:
-            feat[6] = (feat[3] - prev_feat[3]) / FRAME_DT
-            feat[7] = (feat[4] - prev_feat[4]) / FRAME_DT
-            feat[8] = (feat[5] - prev_feat[5]) / FRAME_DT
-        # else feats 6-8 remain 0 (first frame)
-
-        # ── Point cloud shape ─────────────────────────────────────────────────
-        feat[9]  = float(len(pts))
-        feat[10] = float(np.sqrt(np.var(pts[:, 0]) + np.var(pts[:, 1])))  # spread_xy
-        feat[11] = float(np.max(pts[:, 2]) - np.min(pts[:, 2]))           # height_range
-
-    # ── Tracker features [12-17] ──────────────────────────────────────────────
+    # 2) Track Features (6)
+    track_feat = np.zeros(6, dtype=np.float32)
     if track_data and len(track_data) > 0:
         td = track_data[0]
-        # td layout: [trackId, x, y, z, vx, vy, vz, ...]
-        for i, idx in enumerate(range(12, 18)):
-            feat[idx] = float(td[i + 1]) if len(td) > i + 1 else 0.0
+        if len(td) >= 7:
+            track_feat = np.array(td[1:7], dtype=np.float32)
 
-    # ── Height features [18-19] ───────────────────────────────────────────────
+    # 3) Height Features (2)
+    height_feat = np.zeros(2, dtype=np.float32)
     if height_data and len(height_data) > 0:
         hd = height_data[0]
-        # hd layout: [trackId, maxZ, minZ, ...]
-        feat[18] = float(hd[1]) if len(hd) > 1 else 0.0
-        feat[19] = float(hd[2]) if len(hd) > 2 else 0.0
+        if len(hd) >= 3:
+            height_feat = np.array(hd[1:3], dtype=np.float32)
 
-    # Return feat twice: new callers use feat only; old callers unpack (feat, prev)
-    return feat, feat
+    # Combine into 20-dim feature vector
+    feat = np.concatenate([pc_feat, track_feat, height_feat])
+    return feat, current_velocity
 
 
 def extract_recording_features(frames):
@@ -105,14 +80,14 @@ def extract_recording_features(frames):
     Process all frames in a recording -> (T, 20) feature array.
     """
     features = []
-    prev = None
+    prev_vel = None
     for frame_obj in frames:
         fd = frame_obj.get("frameData", frame_obj)
         pc = fd.get("pointCloud", [])
         td = fd.get("trackData", [])
         hd = fd.get("heightData", [])
-
-        feat, prev = extract_frame_features(pc, td, hd, prev)
+        
+        feat, prev_vel = extract_frame_features(pc, td, hd, prev_vel)
         features.append(feat)
     return np.array(features, dtype=np.float32)
 
@@ -122,18 +97,18 @@ def build_sliding_windows(feature_buffer, window_size, stride):
     Build all complete sliding windows from a growing feature buffer.
 
     Args:
-        feature_buffer : list of np.array(20,) frames
-        window_size    : int, frames per window
-        stride         : int, frames to slide
+        feature_buffer: list of np.array(20,) frames accumulated so far
+        window_size: int, frames per window
+        stride: int, frames to slide
 
     Returns:
-        list of np.array(window_size, 20)
+        list of np.array(window_size, 20) -- newly extractable windows
     """
     T = len(feature_buffer)
     windows = []
     if T < window_size:
         return windows
     for start in range(0, T - window_size + 1, stride):
-        windows.append(np.array(feature_buffer[start:start + window_size],
-                                dtype=np.float32))
+        window = np.array(feature_buffer[start:start + window_size], dtype=np.float32)
+        windows.append(window)
     return windows
