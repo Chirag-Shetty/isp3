@@ -1,13 +1,13 @@
 """
 app.py
 ------
-FastAPI inference server for multi-class activity detection.
+FastAPI inference server for BINARY fall detection.
 Runs on Hugging Face Spaces (Docker).
 
 Endpoints:
-    GET  /health   → {"status": "ok"}
-    POST /predict  → {"window": [[20 floats] × 40]}
-                   ← {"class_id", "class_name", "confidence", "is_fall", "probs"}
+    GET  /health   -> {"status": "ok"}
+    POST /predict  -> {"window": [[20 floats] x 40]}
+                   <- {"class_id", "class_name", "confidence", "is_fall", "probs"}
 """
 
 import pickle
@@ -18,52 +18,37 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import List
 
-from model import MultiClassTransformerCNNLSTM
+from model import FallDetectionTransformerCNNLSTM
 
-# ── Config ─────────────────────────────────────────────────────────────────────
-# Multi-class model: 6 activities
+# -- Config -------------------------------------------------------------------
 CLASSES = [
-    "Standing_walk",              # 0
-    "Sitting_chair",              # 1
-    "sitting_floor",              # 2
-    "Stand_Sit_chair_transition", # 3
-    "chair_floor_transition",     # 4
-    "stand_floor_transition",     # 5
+    "NO-FALL",   # 0
+    "FALL",      # 1
 ]
 
-# Classes that should be flagged as "fall" events
-FALL_CLASS_IDS = {5}  # stand_floor_transition can indicate a fall
+FALL_CLASS_IDS = {1}   # class 1 is always FALL
 
 NUM_FEATURES = 20
-NUM_CLASSES  = len(CLASSES)
+NUM_CLASSES  = 2
 
-MODEL_PATH  = "./multi_class_model_best.pth"
-SCALER_PATH = "./multi_class_scaler.pkl"
+MODEL_PATH  = "./fall_detection_model_best.pth"
+SCALER_PATH = "./fall_scaler.pkl"
 
-# ── Load model once at startup ─────────────────────────────────────────────────
-print("[startup] Loading model and scaler …")
+# -- Load model once at startup -----------------------------------------------
+print("[startup] Loading binary fall detection model ...")
 device = torch.device("cpu")
 
-model = MultiClassTransformerCNNLSTM(num_features=NUM_FEATURES, num_classes=NUM_CLASSES)
+model = FallDetectionTransformerCNNLSTM(input_size=NUM_FEATURES, num_classes=NUM_CLASSES)
 model_loaded = False
 try:
-    checkpoint = torch.load(MODEL_PATH, map_location=device, weights_only=True)
-
-    # The new model saves state_dict directly (OrderedDict), not wrapped in a dict
-    if isinstance(checkpoint, dict) and not any(k.startswith(('input_proj', 'transformer', 'cnn', 'lstm', 'fc')) for k in checkpoint.keys()):
-        # Wrapped format
-        state_dict = checkpoint.get('sd') or checkpoint.get('model_state_dict') or checkpoint
-    else:
-        # Direct state_dict (OrderedDict of tensors)
-        state_dict = checkpoint
-
+    state_dict = torch.load(MODEL_PATH, map_location=device, weights_only=True)
     model.load_state_dict(state_dict)
     model_loaded = True
-    print(f"[startup] ✓ Weights loaded ({NUM_CLASSES}-class model)")
+    print("[startup] Model loaded OK (binary: NO-FALL / FALL)")
 except FileNotFoundError:
-    print(f"[startup] ⚠ {MODEL_PATH} not found — upload it to the Space repo")
+    print(f"[startup] WARNING: {MODEL_PATH} not found - upload it to the Space repo")
 except Exception as e:
-    print(f"[startup] ⚠ Model load error: {e}")
+    print(f"[startup] WARNING: Model load error: {e}")
 
 model.eval()
 
@@ -71,21 +56,20 @@ scaler = None
 try:
     with open(SCALER_PATH, "rb") as f:
         scaler = pickle.load(f)
-    print("[startup] ✓ Scaler loaded")
+    print("[startup] Scaler loaded OK")
 except FileNotFoundError:
-    print(f"[startup] ⚠ {SCALER_PATH} not found — features will not be scaled")
+    print(f"[startup] WARNING: {SCALER_PATH} not found - features will not be scaled")
 
-# ── FastAPI ────────────────────────────────────────────────────────────────────
+# -- FastAPI ------------------------------------------------------------------
 app = FastAPI(
-    title="Multi-Class Activity Detection API",
-    description="Transformer-CNN-LSTM model for IWR6843 radar activity recognition (6 classes)",
-    version="2.0.0",
+    title="Binary Fall Detection API",
+    description="Transformer-CNN-LSTM model for IWR6843 radar — NO-FALL vs FALL (2 classes)",
+    version="3.0.0",
 )
 
 
 @app.get("/", include_in_schema=False)
 def root():
-    """Redirect base URL to interactive API docs."""
     return RedirectResponse(url="/docs")
 
 
@@ -103,31 +87,32 @@ class PredictResponse(BaseModel):
 
 @app.get("/health")
 def health():
-    """Quick liveness check — also shows whether model/scaler loaded."""
     return {
-        "status":       "ok",
-        "model_loaded": model_loaded,
+        "status":        "ok",
+        "model_loaded":  model_loaded,
         "scaler_loaded": scaler is not None,
-        "num_classes":  NUM_CLASSES,
-        "classes":      CLASSES,
+        "num_classes":   NUM_CLASSES,
+        "classes":       CLASSES,
     }
 
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
     """
-    Run inference on a single feature window.
+    Run binary fall detection on a single feature window.
 
     Body:
-        window  — list of lists, shape (N, 20).
-                  N is typically 40 (WINDOW_SIZE from config.py).
+        window  -- list of lists, shape (40, 20)
 
     Returns:
-        class_id, class_name, confidence, is_fall, probs
+        class_id   : 0 = NO-FALL, 1 = FALL
+        class_name : "NO-FALL" or "FALL"
+        confidence : probability of the predicted class
+        is_fall    : True if class_id == 1
+        probs      : [P(NO-FALL), P(FALL)]
     """
     window = np.array(req.window, dtype=np.float32)
 
-    # Validate shape
     if window.ndim != 2 or window.shape[1] != NUM_FEATURES:
         raise HTTPException(
             status_code=422,
@@ -136,11 +121,9 @@ def predict(req: PredictRequest):
 
     W, F = window.shape
 
-    # Scale features (same as training)
+    # Scale features (same StandardScaler as training)
     if scaler is not None:
-        flat   = window.reshape(-1, F)
-        flat   = scaler.transform(flat)
-        window = flat.reshape(W, F)
+        window = scaler.transform(window.reshape(-1, F)).reshape(W, F)
 
     # Inference
     x = torch.tensor(window, dtype=torch.float32).unsqueeze(0)  # (1, W, F)
