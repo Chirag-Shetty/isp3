@@ -734,6 +734,7 @@ def main():
                 print(f"{'-'*50}")
 
                 # ── Process each frame ───────────────────────────────────────
+                _dbg_pts = []   # track n_points per frame for this file
                 for frame_dict in frames:
                     frame_count += 1
 
@@ -743,6 +744,7 @@ def main():
 
                     feat, prev_velocity = extract_frame_features(pc, td, hd, prev_velocity)
                     feature_buffer.append(feat)
+                    _dbg_pts.append(len(pc))   # raw point count before SNR filter
 
                     # Check if we have enough frames for a window
                     if len(feature_buffer) < WINDOW_SIZE:
@@ -755,6 +757,15 @@ def main():
                     window = np.array(feature_buffer[-WINDOW_SIZE:], dtype=np.float32)
                     windows_sent += 1
                     ts = datetime.now(timezone.utc).isoformat()
+
+                    # ── DEBUG: print feature stats for FIRST window of each file ─
+                    if windows_sent == 1 or (windows_sent - 1) % 10 == 0:
+                        nonzero = int(np.count_nonzero(window))
+                        print(f"  [DEBUG] window#{windows_sent:04d} "
+                              f"feat_mean={window.mean():.4f} "
+                              f"feat_std={window.std():.4f} "
+                              f"nonzero={nonzero}/{window.size} "
+                              f"pts/frame={np.mean(_dbg_pts):.1f}")
 
                     # ── Run inference ────────────────────────────────────────
                     result = {}
