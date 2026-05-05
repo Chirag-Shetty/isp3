@@ -1,0 +1,28 @@
+# ── Python cache ──────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.egg-info/
+
+# ── Raw radar JSON data files (large, not code) ───────
+# Exclude JSON files inside data/recording folders
+Dataset1/*.json
+Dataset1/Dataset1/**/*.json
+Dataset1/new_test_json/
+Dataset1/aug_dataset_binary/
+Dataset1/test_dataset_binary/
+
+# Also exclude the loose raw data JSONs at root level
+1data.json
+2data.json
+4data.json
+
+# ── Large dataset root ────────────────────────────────
+dataset_26_09_25*/
+
+# ── OS / editor ───────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp

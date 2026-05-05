@@ -38,8 +38,8 @@ NUM_FEATURES  = 20    # feature vector size (matches multi_class_model_best.pth)
 # ============================================================
 # Path to your trained model .pth file (only used if RUN_INFERENCE=True and
 # INFERENCE_URL is empty, i.e. local inference fallback)
-MODEL_PATH  = "./multi_class_model_best.pth"
-SCALER_PATH = "./multi_class_scaler.pkl"
+MODEL_PATH  = "./fall_detection_model_best.pth"
+SCALER_PATH = "./fall_scaler.pkl"
 
 # Set to False to skip ML inference and only stream raw features
 RUN_INFERENCE = True
@@ -56,11 +56,7 @@ INFERENCE_URL = "https://chiragshetty888-fall-detection-api.hf.space/predict"
 #  Class Labels (must match training order)
 # ============================================================
 CLASSES = [
-    "Standing_walk",              # 0
-    "Sitting_chair",              # 1
-    "sitting_floor",              # 2
-    "Stand_Sit_chair_transition", # 3
-    "chair_floor_transition",     # 4
-    "stand_floor_transition",     # 5
+    "NO-FALL",   # 0  (all normal activities)
+    "FALL",      # 1
 ]
-FALL_CLASS_IDS = {5}  # stand_floor_transition can indicate a fall
+FALL_CLASS_IDS = {1}  # class 1 is always a fall
