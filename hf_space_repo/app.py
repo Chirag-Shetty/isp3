@@ -21,13 +21,14 @@ from typing import List
 
 # ── Thresholds (from mmWave physics + ESPHome IWR6843 production) ─────────────
 PERSON_TALL_THRESH   = 0.60   # height_range > this = person was upright
-PERSON_FALLEN_THRESH = 0.50   # height_range < this = person is flat/fallen
+PERSON_FALLEN_THRESH = 0.45   # height_range < this = person is flat/fallen
 N_POINTS_LOW         = 10     # n_points < this = sparse (floor reflection)
 Z_DROP_THRESH        = 0.40   # z_mean must drop this much from recent peak
 HISTORY_FRAMES       = 25
 SMOOTH_N             = 5
-MIN_POINTS_VALID     = 2      # ignore frames with < 2 points (noise)
+MIN_POINTS_VALID     = 5      # ignore frames with < 5 points (noise/empty)
 PERSIST_FRAMES       = 2      # flat height_range must persist N frames
+PRESENCE_MIN_PTS     = 4      # recent avg n_points must exceed this — no person = no fall
 
 
 # ── Embedded detector (no pkl needed) ─────────────────────────────────────────
@@ -60,7 +61,7 @@ class FallThresholdDetector:
         if self._cooldown > 0:
             self._cooldown -= 1
 
-        # Only buffer valid frames (enough points to be reliable)
+        # Only buffer frames with enough points to be reliable
         if n_points >= MIN_POINTS_VALID:
             self._hrng_buf.append(height_range)
             self._z_buf.append(z_mean)
@@ -69,6 +70,12 @@ class FallThresholdDetector:
         if len(self._hrng_buf) < max(SMOOTH_N, 5):
             return False, 0.0
 
+        # ── Presence check: recent frames must have enough points ─────────
+        # Prevents empty-frame and sparse-walking false positives
+        recent_npts = list(self._npts_buf)[-5:]
+        person_present = (len(recent_npts) >= 3 and
+                          float(sum(recent_npts)) / len(recent_npts) >= PRESENCE_MIN_PTS)
+
         # Smoothed z and peak
         recent_z  = list(self._z_buf)
         z_smooth  = float(np.mean(recent_z[-SMOOTH_N:]))
@@ -76,9 +83,13 @@ class FallThresholdDetector:
         z_drop    = z_peak - z_smooth
 
         hrng_hist = list(self._hrng_buf)
-        was_tall  = max(hrng_hist[-min(HISTORY_FRAMES, len(hrng_hist)):]) > PERSON_TALL_THRESH
+        was_tall  = (len(hrng_hist) >= 5 and
+                     max(hrng_hist[-min(HISTORY_FRAMES, len(hrng_hist)):]) > PERSON_TALL_THRESH)
+
+        # is_flat: requires valid points AND person is present (not empty room)
         is_flat   = (height_range < PERSON_FALLEN_THRESH
-                     and n_points >= MIN_POINTS_VALID)
+                     and n_points >= MIN_POINTS_VALID
+                     and person_present)
         z_dropped = z_drop > Z_DROP_THRESH
         few_pts   = MIN_POINTS_VALID <= n_points < N_POINTS_LOW
 
