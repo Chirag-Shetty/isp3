@@ -1,22 +1,15 @@
 """
-app.py — Fall Detection API v7 (Rate-of-Collapse Detector)
-===========================================================
-FALL  = sudden rapid collapse of height_range (< 1 second)
-NO-FALL = standing, walking, sitting, sit-to-stand, sleeping (slow)
+app.py — Fall Detection API v8 (Z-Drop Primary)
+================================================
+z_mean (centroid height) drops from ~3m to ~0.7m during a fall.
+This is the PRIMARY signal. height_range is secondary.
 
-Key insight:
-  A FALL drops height_range by ~0.8m in < 10 frames (< 0.55 sec)
-  Sleeping/sitting: same drop but over 30+ frames (slow)
-
-Signals used:
-  1. steepest_8frame_slope < -0.06 m/frame  (fast collapse)
-  2. total_drop > 0.40m                      (large drop)
-  3. final_hrng < 0.45m                      (ended on floor)
-  4. was_upright: init_hrng > 0.50m          (was standing/walking/sitting)
-
-Sleeping is correctly rejected because slope is slow (~0.02 m/frame)
-Sitting   is correctly rejected because final_hrng > 0.45m (chair height)
-Walking   is correctly rejected because total_drop is small and no floor ending
+FALL  = z_mean drops > 1.5m AND ends at low position AND was fast
+NO-FALL examples:
+  sitting:     z drops ~1m, ends at chair height (> 1.2m)  → rejected by final_z
+  sleeping:    z drops > 1.5m, ends low BUT slope is slow  → rejected by speed
+  walking:     z stable, no large drop                      → rejected by magnitude
+  empty room:  < 4 pts/frame                                → rejected by presence
 """
 
 import numpy as np
@@ -26,20 +19,21 @@ from pydantic import BaseModel
 from typing import List
 
 # ── Thresholds ─────────────────────────────────────────────────────────────────
-PERSON_TALL_THRESH   = 0.50   # init_hrng > this = person was upright/sitting
-PERSON_FALLEN_THRESH = 0.42   # final_hrng < this = person on floor
-FALL_SLOPE_THRESH    = -0.055 # steepest 8-frame slope < this = FAST collapse
-TOTAL_DROP_THRESH    = 0.38   # peak-to-trough height_range drop > this
-MIN_POINTS_VALID     = 4      # frames with < 4 pts ignored (noise/empty)
-SMOOTH_N             = 5      # rolling mean window for height_range
-MIN_VALID_FRAMES     = 16     # need at least 16 valid frames in window
-FRAME_DT             = 0.055  # seconds between frames
+Z_DROP_THRESH        = 1.5    # total z_mean drop (init - final) > this = fall candidate
+Z_DROP_FAST_THRESH   = 0.8    # fast z_drop (init - final) if slope also fast
+FINAL_Z_THRESH       = 1.5    # final z_mean must be < this (person on floor, not chair)
+INIT_Z_THRESH        = 1.5    # init z_mean must be > this (was upright/present)
+Z_SLOPE_THRESH       = -0.05  # smoothed z slope < this m/frame = fast fall
+MIN_POINTS_VALID     = 4      # frames with < 4 pts ignored
+SMOOTH_N             = 5      # rolling mean window
+MIN_VALID_FRAMES     = 16     # minimum valid frames needed
+FRAME_DT             = 0.055  # seconds per frame
 
-VERSION = "7.0.0"
+VERSION = "8.0.0"
 
 
 def smooth_signal(values, valid_mask, k=5):
-    """k-frame rolling mean over valid frames only. Returns NaN for gaps."""
+    """k-frame rolling mean over valid frames only."""
     out = np.full(len(values), np.nan)
     for t in range(len(values)):
         sl = values[max(0, t-k+1):t+1]
@@ -52,17 +46,15 @@ def smooth_signal(values, valid_mask, k=5):
 
 def detect_fall(window: np.ndarray):
     """
-    window : (N, 20) array — pipeline feature window
-      col  2 = z_mean       (centroid height)
+    window : (N, 20) — pipeline feature window
+      col  2 = z_mean       (centroid height — PRIMARY signal)
       col  9 = n_points
-      col 10 = spread_xy    (horizontal spread)
-      col 11 = height_range (z_max - z_min per frame)
-
-    Returns (is_fall, confidence, debug_dict)
+      col 10 = spread_xy
+      col 11 = height_range (z_max - z_min — secondary signal)
     """
     npts = window[:, 9].astype(np.float32)
-    hrng = window[:, 11].astype(np.float32)
     z    = window[:, 2].astype(np.float32)
+    hrng = window[:, 11].astype(np.float32)
     spxy = window[:, 10].astype(np.float32)
     valid = npts >= MIN_POINTS_VALID
 
@@ -70,101 +62,99 @@ def detect_fall(window: np.ndarray):
     if n_valid < MIN_VALID_FRAMES:
         return False, 0.0, {"reason": "too_few_valid_frames", "n_valid": n_valid}
 
-    # ── Smooth height_range and z ─────────────────────────────────────────────
-    hrng_s = smooth_signal(hrng, valid, k=SMOOTH_N)
+    # ── Smooth z_mean and height_range ────────────────────────────────────────
     z_s    = smooth_signal(z,    valid, k=SMOOTH_N)
-    ok     = ~np.isnan(hrng_s)
+    hrng_s = smooth_signal(hrng, valid, k=SMOOTH_N)
+    ok     = ~np.isnan(z_s)
 
     if ok.sum() < MIN_VALID_FRAMES:
         return False, 0.0, {"reason": "insufficient_smooth_data"}
 
-    hs = hrng_s[ok]   # valid smoothed height_range values
     zs = z_s[ok]
+    hs = hrng_s[ok]
 
-    # ── Key measurements ──────────────────────────────────────────────────────
-    n = len(hs)
-    h = n // 2
+    n = len(zs)
 
-    # Initial state: average of FIRST 8 valid smoothed frames
-    init_hrng  = float(np.mean(hs[:min(8, n)]))
-    # Final state: average of LAST 8 valid smoothed frames
-    final_hrng = float(np.mean(hs[max(0, n-8):]))
-    # Peak in first half (tallest the person was)
-    peak_hrng  = float(np.max(hs[:max(h, 1)]))
-    # Trough in second half (lowest the person got)
-    trough_hrng = float(np.min(hs[h:]))
+    # ── Z measurements ────────────────────────────────────────────────────────
+    init_z  = float(np.mean(zs[:min(10, n)]))   # first 10 frames avg
+    final_z = float(np.mean(zs[max(0, n-10):]))  # last 10 frames avg
+    peak_z  = float(np.max(zs[:max(n//2, 1)]))   # highest z in first half
+    trough_z = float(np.min(zs[n//2:]))           # lowest z in second half
 
-    total_drop = peak_hrng - trough_hrng  # large = significant collapse
+    total_z_drop = peak_z - trough_z    # peak in 1st half → trough in 2nd half
+    init_final_drop = init_z - final_z  # simple first→last comparison
 
-    # Z drop
-    init_z  = float(np.mean(zs[:min(8, len(zs))]))
-    final_z = float(np.mean(zs[max(0, len(zs)-8):]))
-    z_drop  = init_z - final_z   # positive = centroid dropped
+    # Steepest z slope (most negative = fastest fall)
+    z_slopes = np.diff(zs)
+    steepest_z = float(z_slopes.min()) if len(z_slopes) > 0 else 0.0
 
-    # Spread change (person goes horizontal = spread increases)
-    spxy_valid = spxy[valid].astype(np.float32)
+    # ── Height-range measurements (secondary) ─────────────────────────────────
+    init_hrng  = float(np.mean(hs[:min(10, n)]))
+    final_hrng = float(np.mean(hs[max(0, n-10):]))
+    hrng_drop  = init_hrng - final_hrng
+
+    # ── Spread (horizontal extent grows when lying down) ─────────────────────
+    spxy_valid = spxy[valid]
     sh = len(spxy_valid) // 2
-    init_spxy  = float(np.mean(spxy_valid[:max(sh,1)]))
+    init_spxy  = float(np.mean(spxy_valid[:max(sh, 1)]))
     final_spxy = float(np.mean(spxy_valid[sh:])) if sh < len(spxy_valid) else init_spxy
-    spread_increase = final_spxy - init_spxy
-
-    # ── Steepest slope: max drop over any 8 consecutive smoothed frames ───────
-    # This is the KEY metric: fall is fast, sleep/sit is slow
-    slopes = np.diff(hs)   # per-frame change in smoothed height_range
-    steepest = float(slopes.min()) if len(slopes) > 0 else 0.0  # most negative
+    spread_delta = final_spxy - init_spxy
 
     # ── Fall signals ──────────────────────────────────────────────────────────
-    was_upright      = init_hrng   > PERSON_TALL_THRESH     # was standing/sitting/walking
-    ended_on_floor   = final_hrng  < PERSON_FALLEN_THRESH   # ended flat on floor
-    fast_collapse    = steepest    < FALL_SLOPE_THRESH       # fast drop (not slow sit/sleep)
-    large_drop       = total_drop  > TOTAL_DROP_THRESH       # big height_range drop
-    z_fell           = z_drop      > 0.30                    # centroid also dropped
-    went_horizontal  = spread_increase > 0.08                # wider = lying down
+    #  Primary (z_mean based)
+    was_high        = init_z   > INIT_Z_THRESH           # person was upright (z high)
+    ended_low       = final_z  < FINAL_Z_THRESH          # person ended at floor level
+    big_drop        = total_z_drop > Z_DROP_THRESH        # large z drop (> 1.5m)
+    moderate_drop   = total_z_drop > Z_DROP_FAST_THRESH   # moderate drop (> 0.8m) if fast
+    fast_fall       = steepest_z   < Z_SLOPE_THRESH       # steep slope = fast
 
-    # Anti-sleeping: if final is low BUT transition was slow → not a fall
-    # (fast_collapse already handles this via slope threshold)
+    #  Secondary (height_range, spread)
+    hrng_collapsed  = hrng_drop    > 0.20                 # height_range also collapsed
+    went_horizontal = spread_delta > 0.05                 # wider footprint
 
-    # Anti-sitting: if person ends at chair height (0.42–0.75m) → not a fall
-    # (ended_on_floor already handles this)
+    # ── Decision ─────────────────────────────────────────────────────────────
+    # CASE 1: Large slow/fast drop → definitely a fall
+    case1 = was_high and ended_low and big_drop
 
-    # Core vote: need fast collapse + ended on floor + was upright
-    core_fall = was_upright and fast_collapse and ended_on_floor
+    # CASE 2: Moderate drop but very fast → also a fall
+    case2 = was_high and ended_low and moderate_drop and fast_fall
 
-    # Supporting signals boost confidence
-    votes = (int(large_drop) + int(z_fell) + int(went_horizontal))
-
-    is_fall    = core_fall and large_drop   # need core + large drop to fire
+    is_fall    = case1 or case2
     confidence = 0.0
     if is_fall:
-        confidence = min(1.0, 0.65 + 0.12 * votes)
+        support = int(hrng_collapsed) + int(went_horizontal) + int(fast_fall)
+        confidence = min(1.0, 0.70 + 0.10 * support)
 
     debug = {
-        "init_hrng":      round(init_hrng, 3),
-        "final_hrng":     round(final_hrng, 3),
-        "peak_hrng":      round(peak_hrng, 3),
-        "trough_hrng":    round(trough_hrng, 3),
-        "total_drop":     round(total_drop, 3),
-        "steepest_slope": round(steepest, 4),
-        "z_drop":         round(z_drop, 3),
-        "spread_increase":round(spread_increase, 3),
-        "was_upright":    was_upright,
-        "ended_on_floor": ended_on_floor,
-        "fast_collapse":  fast_collapse,
-        "large_drop":     large_drop,
-        "z_fell":         z_fell,
-        "went_horizontal":went_horizontal,
-        "n_valid":        n_valid,
+        "init_z":        round(init_z, 3),
+        "final_z":       round(final_z, 3),
+        "peak_z":        round(peak_z, 3),
+        "trough_z":      round(trough_z, 3),
+        "total_z_drop":  round(total_z_drop, 3),
+        "init_final_drop": round(init_final_drop, 3),
+        "steepest_z_slope": round(steepest_z, 4),
+        "init_hrng":     round(init_hrng, 3),
+        "final_hrng":    round(final_hrng, 3),
+        "hrng_drop":     round(hrng_drop, 3),
+        "spread_delta":  round(spread_delta, 3),
+        "was_high":      was_high,
+        "ended_low":     ended_low,
+        "big_drop":      big_drop,
+        "fast_fall":     fast_fall,
+        "case1":         case1,
+        "case2":         case2,
+        "n_valid":       n_valid,
     }
     return is_fall, confidence, debug
 
 
 # ── FastAPI ───────────────────────────────────────────────────────────────────
 app = FastAPI(
-    title="Fall Detection API — Rate-of-Collapse v7",
+    title="Fall Detection API — Z-Drop v8",
     description=(
-        "Detects SUDDEN collapse of radar height_range (fall) vs "
-        "SLOW descent (sleeping, sitting). "
-        "No ML model — pure physics thresholds."
+        "PRIMARY signal: z_mean (centroid height) drops > 1.5m. "
+        "Rejects sitting (ends at chair height > 1.5m), "
+        "sleeping (slow slope), empty room (< 4 pts/frame)."
     ),
     version=VERSION,
 )
@@ -181,14 +171,15 @@ def root():
 def health():
     return {
         "status":     "ok",
-        "model_type": "RateOfCollapse",
+        "model_type": "ZDropPrimary",
         "version":    VERSION,
         "thresholds": {
-            "person_tall_thresh":   PERSON_TALL_THRESH,
-            "person_fallen_thresh": PERSON_FALLEN_THRESH,
-            "fall_slope_thresh":    FALL_SLOPE_THRESH,
-            "total_drop_thresh":    TOTAL_DROP_THRESH,
-            "min_points_valid":     MIN_POINTS_VALID,
+            "z_drop_thresh":      Z_DROP_THRESH,
+            "z_drop_fast_thresh": Z_DROP_FAST_THRESH,
+            "final_z_thresh":     FINAL_Z_THRESH,
+            "init_z_thresh":      INIT_Z_THRESH,
+            "z_slope_thresh":     Z_SLOPE_THRESH,
+            "min_points_valid":   MIN_POINTS_VALID,
         },
         "classes": CLASSES,
     }
@@ -209,23 +200,22 @@ class PredictResponse(BaseModel):
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):
     """
-    Detect fall from a (N, 20) radar feature window.
+    Detect fall from (N, 20) radar feature window.
 
-    FALL fired when ALL true:
-      - person was upright recently (init height_range > 0.50m)
-      - person ended on floor (final height_range < 0.42m)
-      - collapse was FAST (steepest 1-frame drop > 0.055 m/frame)
-      - total height_range drop > 0.38m
+    FALL when:
+      z_mean drops > 1.5m (peak→trough) AND ends at z < 1.5m
+      OR drops > 0.8m AND fast slope < -0.05 m/frame AND ends low
 
-    Rejects: sleeping (slow slope), sitting (chair height > 0.42m),
-             empty room (< 4 pts/frame), walking (no floor ending)
+    Rejects:
+      sitting   — ends at chair height (z > 1.5m)
+      sleeping  — slow slope
+      walking   — z stays high, no large drop
+      empty room — < 4 pts/frame
     """
     window = np.array(req.window, dtype=np.float32)
     if window.ndim != 2 or window.shape[1] < 12:
-        raise HTTPException(
-            status_code=422,
-            detail=f"window must be (N, >=12), got {list(window.shape)}"
-        )
+        raise HTTPException(status_code=422,
+            detail=f"window must be (N, >=12), got {list(window.shape)}")
 
     is_fall, confidence, debug = detect_fall(window)
     class_id = 1 if is_fall else 0
