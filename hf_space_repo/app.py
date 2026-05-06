@@ -20,14 +20,14 @@ from pydantic import BaseModel
 from typing import List
 
 # ── Thresholds (from mmWave physics + ESPHome IWR6843 production) ─────────────
-PERSON_TALL_THRESH   = 0.70   # height_range > this = person was upright
-PERSON_FALLEN_THRESH = 0.35   # height_range < this = person is flat
-N_POINTS_LOW         = 8      # n_points < this = sparse (floor reflection)
-Z_DROP_THRESH        = 0.45   # z_mean must drop this much from recent peak
+PERSON_TALL_THRESH   = 0.60   # height_range > this = person was upright
+PERSON_FALLEN_THRESH = 0.50   # height_range < this = person is flat/fallen
+N_POINTS_LOW         = 10     # n_points < this = sparse (floor reflection)
+Z_DROP_THRESH        = 0.40   # z_mean must drop this much from recent peak
 HISTORY_FRAMES       = 25
 SMOOTH_N             = 5
-MIN_POINTS_VALID     = 3      # ignore frames with < 3 points (noise)
-PERSIST_FRAMES       = 4      # flat height_range must persist N frames
+MIN_POINTS_VALID     = 2      # ignore frames with < 2 points (noise)
+PERSIST_FRAMES       = 2      # flat height_range must persist N frames
 
 
 # ── Embedded detector (no pkl needed) ─────────────────────────────────────────
@@ -91,7 +91,9 @@ class FallThresholdDetector:
 
         primary   = was_tall and sustained_flat
         secondary = was_tall and z_dropped and few_pts
-        is_fall   = (primary or secondary) and self._cooldown == 0
+        tertiary  = was_tall and z_dropped and sustained_flat  # z drop + flat
+
+        is_fall   = (primary or secondary or tertiary) and self._cooldown == 0
 
         if is_fall:
             self._cooldown = 40
