@@ -61,7 +61,7 @@ INFERENCE_URL = "https://chiragshetty888-fall-detection-api.hf.space/predict"
 # ============================================================
 # Endpoint for per-frame feature streaming to the AWS API.
 # Example: http://<ec2-public-ip>/frame
-CLOUD_API_URL = os.getenv("CLOUD_API_URL", "http://52.66.50.49/frame")
+CLOUD_API_URL = os.getenv("CLOUD_API_URL", "http://43.205.167.81/frame")
 DEVICE_ID = os.getenv("DEVICE_ID", "rpi-1")
 CLOUD_TIMEOUT = float(os.getenv("CLOUD_TIMEOUT", "1.5"))
 
