@@ -22,6 +22,12 @@ const CC = {
 const DEFAULT_CLASS_ORDER = ['Standing_walk','Sitting_chair','sitting_floor','Stand_Sit_chair_transition','chair_floor_transition','stand_floor_transition'];
 const BINARY_CLASS_ORDER = ['NO-FALL','FALL'];
 const DEFAULT_WS_URL = 'ws://43.205.167.81/ws';
+const DEFAULT_API_URL = 'http://43.205.167.81';
+const DEFAULT_DEVICE_ID = 'rpi-1';
+
+function isStaticHost(host) {
+  return host.includes('amazonaws.com') || host.includes('cloudfront.net');
+}
 
 function cfg(name) {
   return CC[name] || { label: name||'Unknown', icon:Activity, color:'#64748b', glow:'rgba(100,116,139,0.1)', border:'rgba(100,116,139,0.3)', cat:'safe' };
@@ -101,7 +107,10 @@ function HRow({ event, delay = 0, classOrder }) {
   const [open, setOpen] = useState(false);
   const c = cfg(event.class_name);
   const Icon = c.icon;
-  const timeStr = new Date(event.timestamp).toLocaleTimeString([], { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const ts = event.timestamp || event.ts;
+  const timeStr = ts
+    ? new Date(ts).toLocaleTimeString([], { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' })
+    : '--:--:--';
 
   return (
     <div
@@ -147,6 +156,7 @@ function HRow({ event, delay = 0, classOrder }) {
 export default function App() {
   const [telemetry, setTelemetry] = useState([]);
   const [connected, setConnected] = useState(false);
+  const deviceId = import.meta.env.VITE_DEVICE_ID || DEFAULT_DEVICE_ID;
 
   useEffect(() => {
     const wsUrl = (() => {
@@ -155,8 +165,25 @@ export default function App() {
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const host = window.location.hostname;
       if (host === 'localhost' || host === '127.0.0.1') return DEFAULT_WS_URL;
+      if (isStaticHost(host)) return DEFAULT_WS_URL;
       return `${proto}://${host}/ws`;
     })();
+
+    const apiBase = (() => {
+      if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+      if (wsUrl) return wsUrl.replace(/^ws/, 'http').replace(/\/ws$/, '');
+      return DEFAULT_API_URL;
+    })();
+
+    if (apiBase) {
+      const historyUrl = `${apiBase}/history?device_id=${encodeURIComponent(deviceId)}&limit=60`;
+      fetch(historyUrl)
+        .then(res => (res.ok ? res.json() : []))
+        .then(data => {
+          if (Array.isArray(data) && data.length) setTelemetry(data);
+        })
+        .catch(() => {});
+    }
 
     if (!wsUrl) return () => {};
 
@@ -194,7 +221,7 @@ export default function App() {
       if (retryTimer) clearTimeout(retryTimer);
       if (ws) ws.close();
     };
-  }, []);
+  }, [deviceId]);
 
   const classOrder = useMemo(() => {
     const hasBinary = telemetry.some(e => e.class_name === 'FALL' || e.class_name === 'NO-FALL');
@@ -211,6 +238,7 @@ export default function App() {
   const totalFrames = latest?.frame_count ?? 0;
   const fallCount   = telemetry.filter(e => e.is_fall).length;
   const avgConf     = telemetry.length ? (telemetry.reduce((s,e) => s+(e.confidence||0), 0)/telemetry.length*100).toFixed(1) : '—';
+  const latestTs = latest?.timestamp || latest?.ts;
 
   return (
     <div className="app-root">
@@ -286,7 +314,7 @@ export default function App() {
                   {latest.class_name}
                 </div>
                 <div className="act-ts">
-                  {new Date(latest.timestamp).toLocaleString()} · Frame #{latest.frame_count}
+                  {latestTs ? new Date(latestTs).toLocaleString() : '--'} · Frame #{latest.frame_count ?? '--'}
                 </div>
               </div>
               <div className="act-conf-block">

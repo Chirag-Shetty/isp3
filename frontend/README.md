@@ -14,6 +14,8 @@ Edit `.env.local` and set:
 
 ```
 VITE_WS_URL=ws://<your-ec2-ip>/ws
+VITE_API_URL=http://<your-ec2-ip>
+VITE_DEVICE_ID=rpi-1
 ```
 
 ## Build and run
