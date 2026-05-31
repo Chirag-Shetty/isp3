@@ -21,6 +21,7 @@ const CC = {
 };
 const DEFAULT_CLASS_ORDER = ['Standing_walk','Sitting_chair','sitting_floor','Stand_Sit_chair_transition','chair_floor_transition','stand_floor_transition'];
 const BINARY_CLASS_ORDER = ['NO-FALL','FALL'];
+const DEFAULT_WS_URL = 'ws://52.66.50.49/ws';
 
 function cfg(name) {
   return CC[name] || { label: name||'Unknown', icon:Activity, color:'#64748b', glow:'rgba(100,116,139,0.1)', border:'rgba(100,116,139,0.3)', cat:'safe' };
@@ -153,9 +154,7 @@ export default function App() {
       if (typeof window === 'undefined') return '';
       const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
       const host = window.location.hostname;
-      if (host === 'localhost' || host === '127.0.0.1') {
-        return `${proto}://localhost:8000/ws`;
-      }
+      if (host === 'localhost' || host === '127.0.0.1') return DEFAULT_WS_URL;
       return `${proto}://${host}/ws`;
     })();
 
