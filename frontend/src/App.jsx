@@ -1,144 +1,92 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { supabase } from './lib/supabase';
 import {
   Activity, AlertTriangle, ShieldCheck, ChevronDown, ChevronUp,
   Footprints, Armchair, CircleUserRound, ArrowDownUp, ArrowUpDown,
-  TrendingDown, Radar, Wifi, WifiOff, BarChart3
+  TrendingDown, Radar, Wifi, WifiOff, BarChart3, Zap, Clock, Hash
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
 
-// ── Class configuration ──────────────────────────────────────────────────────
-const CLASS_CONFIG = {
-  Standing_walk: {
-    label: 'Walking / Standing',
-    icon: Footprints,
-    color: '#06b6d4',
-    bgGlow: 'rgba(6, 182, 212, 0.15)',
-    borderColor: 'rgba(6, 182, 212, 0.6)',
-    category: 'safe',
-  },
-  Sitting_chair: {
-    label: 'Sitting (Chair)',
-    icon: Armchair,
-    color: '#10b981',
-    bgGlow: 'rgba(16, 185, 129, 0.15)',
-    borderColor: 'rgba(16, 185, 129, 0.6)',
-    category: 'safe',
-  },
-  sitting_floor: {
-    label: 'Sitting (Floor)',
-    icon: CircleUserRound,
-    color: '#8b5cf6',
-    bgGlow: 'rgba(139, 92, 246, 0.15)',
-    borderColor: 'rgba(139, 92, 246, 0.6)',
-    category: 'safe',
-  },
-  Stand_Sit_chair_transition: {
-    label: 'Stand ↔ Chair',
-    icon: ArrowDownUp,
-    color: '#f59e0b',
-    bgGlow: 'rgba(245, 158, 11, 0.15)',
-    borderColor: 'rgba(245, 158, 11, 0.6)',
-    category: 'transition',
-  },
-  chair_floor_transition: {
-    label: 'Chair ↔ Floor',
-    icon: ArrowUpDown,
-    color: '#f97316',
-    bgGlow: 'rgba(249, 115, 22, 0.15)',
-    borderColor: 'rgba(249, 115, 22, 0.6)',
-    category: 'transition',
-  },
-  stand_floor_transition: {
-    label: 'Stand ↔ Floor',
-    icon: TrendingDown,
-    color: '#ef4444',
-    bgGlow: 'rgba(239, 68, 68, 0.15)',
-    borderColor: 'rgba(239, 68, 68, 0.6)',
-    category: 'alert',
-  },
+// ── Class config ──────────────────────────────────────────────────────────────
+const CC = {
+  'NO-FALL':                   { label:'No Fall',             icon:ShieldCheck,   color:'#34d399', glow:'rgba(52,211,153,0.18)',  border:'rgba(52,211,153,0.35)',  cat:'safe' },
+  'FALL':                      { label:'Fall Detected',       icon:AlertTriangle, color:'#f87171', glow:'rgba(248,113,113,0.22)', border:'rgba(248,113,113,0.45)', cat:'alert' },
+  Standing_walk:              { label:'Walking / Standing',    icon:Footprints,     color:'#22d3ee', glow:'rgba(34,211,238,0.18)',  border:'rgba(34,211,238,0.35)',  cat:'safe' },
+  Sitting_chair:              { label:'Sitting on Chair',      icon:Armchair,       color:'#34d399', glow:'rgba(52,211,153,0.18)',  border:'rgba(52,211,153,0.35)',  cat:'safe' },
+  sitting_floor:              { label:'Sitting on Floor',      icon:CircleUserRound,color:'#a78bfa', glow:'rgba(167,139,250,0.18)',border:'rgba(167,139,250,0.35)', cat:'safe' },
+  Stand_Sit_chair_transition: { label:'Stand ↔ Chair',         icon:ArrowDownUp,    color:'#fbbf24', glow:'rgba(251,191,36,0.18)',  border:'rgba(251,191,36,0.35)',  cat:'transition' },
+  chair_floor_transition:     { label:'Chair ↔ Floor',         icon:ArrowUpDown,    color:'#fb923c', glow:'rgba(251,146,60,0.18)',  border:'rgba(251,146,60,0.35)',  cat:'transition' },
+  stand_floor_transition:     { label:'Stand → Floor (Fall)',  icon:TrendingDown,   color:'#f87171', glow:'rgba(248,113,113,0.22)', border:'rgba(248,113,113,0.45)', cat:'alert' },
 };
+const DEFAULT_CLASS_ORDER = ['Standing_walk','Sitting_chair','sitting_floor','Stand_Sit_chair_transition','chair_floor_transition','stand_floor_transition'];
+const BINARY_CLASS_ORDER = ['NO-FALL','FALL'];
 
-const CLASS_ORDER = [
-  'Standing_walk', 'Sitting_chair', 'sitting_floor',
-  'Stand_Sit_chair_transition', 'chair_floor_transition', 'stand_floor_transition'
-];
-
-function getClassConfig(className) {
-  return CLASS_CONFIG[className] || {
-    label: className || 'Unknown',
-    icon: Activity,
-    color: '#94a3b8',
-    bgGlow: 'rgba(148, 163, 184, 0.15)',
-    borderColor: 'rgba(148, 163, 184, 0.6)',
-    category: 'safe',
-  };
+function cfg(name) {
+  return CC[name] || { label: name||'Unknown', icon:Activity, color:'#64748b', glow:'rgba(100,116,139,0.1)', border:'rgba(100,116,139,0.3)', cat:'safe' };
 }
 
-// ── Probability bar chart for a single event ─────────────────────────────────
-function ProbabilityChart({ probs }) {
-  if (!probs || probs.length < 6) return null;
-
-  const data = CLASS_ORDER.map((cls, i) => ({
-    name: CLASS_CONFIG[cls]?.label || cls,
-    value: +(probs[i] * 100).toFixed(1),
-    color: CLASS_CONFIG[cls]?.color || '#94a3b8',
-  }));
-
+// ── Custom Tooltip ────────────────────────────────────────────────────────────
+function ChartTip({ active, payload }) {
+  if (!active || !payload?.length) return null;
   return (
-    <div className="prob-chart-container">
-      <ResponsiveContainer width="100%" height={160}>
-        <BarChart data={data} layout="vertical" margin={{ left: 4, right: 16, top: 4, bottom: 4 }}>
-          <XAxis type="number" domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-          <YAxis type="category" dataKey="name" width={110} tick={{ fill: '#cbd5e1', fontSize: 11 }} axisLine={false} tickLine={false} />
-          <Tooltip
-            contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, color: '#f8fafc' }}
-            formatter={(v) => [`${v}%`, 'Probability']}
-          />
-          <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={14}>
-            {data.map((entry, idx) => (
-              <Cell key={idx} fill={entry.color} fillOpacity={0.85} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+    <div style={{ background:'#0a0f1e', border:'1px solid rgba(255,255,255,0.1)', borderRadius:10, padding:'8px 14px' }}>
+      <div style={{ color:'#94a3b8', fontSize:'0.75rem' }}>{payload[0].payload.name}</div>
+      <div style={{ color:'#f1f5f9', fontFamily:'JetBrains Mono, monospace', fontWeight:600 }}>{payload[0].value}%</div>
     </div>
   );
 }
 
-// ── Activity distribution summary ────────────────────────────────────────────
-function ActivityDistribution({ telemetry }) {
-  const distribution = useMemo(() => {
+// ── Probability bar chart ─────────────────────────────────────────────────────
+function ProbChart({ probs, classOrder }) {
+  if (!probs || probs.length === 0) return null;
+  const order = probs.length === 2 ? BINARY_CLASS_ORDER : (classOrder || DEFAULT_CLASS_ORDER);
+  if (probs.length < order.length) return null;
+  const data = order.map((cls, i) => ({
+    name: CC[cls]?.label || cls,
+    value: +(probs[i] * 100).toFixed(1),
+    color: CC[cls]?.color || '#64748b',
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={170}>
+      <BarChart data={data} layout="vertical" margin={{ left:4, right:20, top:4, bottom:4 }}>
+        <XAxis type="number" domain={[0,100]} tick={{ fill:'#475569', fontSize:11, fontFamily:'JetBrains Mono, monospace' }} axisLine={false} tickLine={false} />
+        <YAxis type="category" dataKey="name" width={115} tick={{ fill:'#94a3b8', fontSize:11 }} axisLine={false} tickLine={false} />
+        <Tooltip content={<ChartTip />} cursor={{ fill:'rgba(255,255,255,0.03)' }} />
+        <Bar dataKey="value" radius={[0,6,6,0]} barSize={13}>
+          {data.map((d, i) => <Cell key={i} fill={d.color} fillOpacity={0.85} />)}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+// ── Distribution grid ─────────────────────────────────────────────────────────
+function Distribution({ telemetry, classOrder }) {
+  const order = classOrder?.length ? classOrder : DEFAULT_CLASS_ORDER;
+  const dist = useMemo(() => {
     const counts = {};
-    CLASS_ORDER.forEach(cls => { counts[cls] = 0; });
-    telemetry.forEach(ev => {
-      if (ev.class_name && counts[ev.class_name] !== undefined) {
-        counts[ev.class_name]++;
-      }
-    });
+    order.forEach(c => counts[c] = 0);
+    telemetry.forEach(e => { if (e.class_name && counts[e.class_name] !== undefined) counts[e.class_name]++; });
     const total = telemetry.length || 1;
-    return CLASS_ORDER.map(cls => ({
-      className: cls,
-      count: counts[cls],
-      pct: ((counts[cls] / total) * 100).toFixed(1),
-    }));
-  }, [telemetry]);
+    return order.map(c => ({ cls: c, count: counts[c], pct: ((counts[c]/total)*100).toFixed(1) }));
+  }, [telemetry, order]);
 
   return (
     <div className="dist-grid">
-      {distribution.map(({ className, count, pct }) => {
-        const cfg = getClassConfig(className);
-        const Icon = cfg.icon;
+      {dist.map(({ cls, count, pct }) => {
+        const c = cfg(cls);
+        const Icon = c.icon;
         return (
-          <div key={className} className="dist-card" style={{ borderColor: cfg.borderColor }}>
-            <div className="dist-card-icon" style={{ color: cfg.color }}>
+          <div key={cls} className="dist-card" style={{ borderLeftColor: c.color }}>
+            <div className="dist-icon" style={{ color: c.color }}>
               <Icon size={18} />
             </div>
-            <div className="dist-card-info">
-              <span className="dist-card-label">{cfg.label}</span>
-              <span className="dist-card-value">{count} <span className="dist-pct">({pct}%)</span></span>
+            <div className="dist-info">
+              <div className="dist-name">{c.label}</div>
+              <div className="dist-count" style={{ color: c.color }}>
+                {count} <span className="dist-pct">({pct}%)</span>
+              </div>
             </div>
           </div>
         );
@@ -147,217 +95,255 @@ function ActivityDistribution({ telemetry }) {
   );
 }
 
-// ── Expandable history row ───────────────────────────────────────────────────
-function EventRow({ event }) {
-  const [expanded, setExpanded] = useState(false);
-  const cfg = getClassConfig(event.class_name);
-  const Icon = cfg.icon;
+// ── History row ───────────────────────────────────────────────────────────────
+function HRow({ event, delay = 0, classOrder }) {
+  const [open, setOpen] = useState(false);
+  const c = cfg(event.class_name);
+  const Icon = c.icon;
+  const timeStr = new Date(event.timestamp).toLocaleTimeString([], { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
 
   return (
     <div
-      className={`history-row history-${cfg.category}`}
-      style={{ borderLeftColor: cfg.color }}
+      className={`h-row ${c.cat==='alert'?'is-alert':''} ${c.cat==='transition'?'is-transition':''}`}
+      style={{ borderLeftColor: c.color, animationDelay: `${delay}ms` }}
     >
-      <div className="history-header" onClick={() => setExpanded(!expanded)}>
-        <div className="history-summary">
-          <div className="history-icon" style={{ color: cfg.color }}><Icon size={20} /></div>
-          <strong style={{ color: cfg.color }}>{cfg.label}</strong>
-          <span className="history-time">
-            {new Date(event.timestamp).toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            &nbsp;|&nbsp; Frame #{event.frame_count}
-          </span>
+      <div className="h-header" onClick={() => setOpen(!open)}>
+        <div className="h-left">
+          <div className="h-icon" style={{ color: c.color }}><Icon size={18} /></div>
+          <span className="h-label" style={{ color: c.color }}>{c.label}</span>
+          <span className="h-time">{timeStr} · #{event.frame_count}</span>
         </div>
-        <div className="history-actions">
-          <span className="history-conf" style={{ color: cfg.color }}>
-            {(event.confidence * 100).toFixed(1)}%
-          </span>
-          {expanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+        <div className="h-right">
+          <span className="h-conf" style={{ color: c.color }}>{(event.confidence*100).toFixed(1)}%</span>
+          {open ? <ChevronUp size={16}/> : <ChevronDown size={16}/>}
         </div>
       </div>
-
-      {expanded && (
-        <div className="history-details">
-          <div className="detail-grid">
-            <div><span className="label">Points</span>{event.n_points}</div>
-            <div><span className="label">Z-Mean</span>{event.z_mean?.toFixed(3) || 'N/A'}</div>
-            <div><span className="label">Height Range</span>{event.height_range?.toFixed(3) || 'N/A'}</div>
-            <div><span className="label">X-Mean</span>{event.x_mean?.toFixed(3) || 'N/A'}</div>
+      {open && (
+        <div className="h-details">
+          <div className="h-detail-grid">
+            <div className="h-detail-item"><span className="stat-label" style={{display:'block'}}>Points</span>{event.n_points}</div>
+            <div className="h-detail-item"><span className="stat-label" style={{display:'block'}}>Z-Mean</span>{event.z_mean?.toFixed(3) ?? 'N/A'}</div>
+            <div className="h-detail-item"><span className="stat-label" style={{display:'block'}}>Height Range</span>{event.height_range?.toFixed(3) ?? 'N/A'}</div>
+            <div className="h-detail-item"><span className="stat-label" style={{display:'block'}}>X-Mean</span>{event.x_mean?.toFixed(3) ?? 'N/A'}</div>
           </div>
-          <div style={{ marginTop: '16px' }}>
-            <span className="label">Class Probabilities</span>
-            <ProbabilityChart probs={event.probs} />
+          <div style={{ marginBottom:12 }}>
+            <div className="prob-section-title">Class Probabilities</div>
+            <div className="prob-chart-wrap"><ProbChart probs={event.probs} classOrder={classOrder} /></div>
           </div>
-          <div style={{ marginTop: '12px' }}>
-            <span className="label">Raw Window Features (40×20)</span>
-            <pre className="raw-data-dump">
-              {JSON.stringify(event.window_features, null, 2)}
-            </pre>
-          </div>
+          {event.window_features && (
+            <div>
+              <div className="prob-section-title">Raw Window (40×20)</div>
+              <pre className="raw-pre">{JSON.stringify(event.window_features, null, 2)}</pre>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── Main App ─────────────────────────────────────────────────────────────────
-function App() {
+// ── Main App ──────────────────────────────────────────────────────────────────
+export default function App() {
   const [telemetry, setTelemetry] = useState([]);
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const fetchInitialData = async () => {
-      const { data, error } = await supabase
-        .from('radar_predictions')
-        .select('*')
-        .order('id', { ascending: false })
-        .limit(50);
-
-      if (data && data.length > 0) {
-        setTelemetry(data);
+    const wsUrl = (() => {
+      if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+      if (typeof window === 'undefined') return '';
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const host = window.location.hostname;
+      if (host === 'localhost' || host === '127.0.0.1') {
+        return `${proto}://localhost:8000/ws`;
       }
+      return `${proto}://${host}/ws`;
+    })();
+
+    if (!wsUrl) return () => {};
+
+    let ws;
+    let retryTimer;
+
+    const connect = () => {
+      ws = new WebSocket(wsUrl);
+      ws.onopen = () => setConnected(true);
+      ws.onclose = () => {
+        setConnected(false);
+        retryTimer = setTimeout(connect, 2000);
+      };
+      ws.onerror = () => {
+        setConnected(false);
+        ws.close();
+      };
+      ws.onmessage = (evt) => {
+        try {
+          const row = JSON.parse(evt.data);
+          setTelemetry(prev => {
+            const next = [row, ...prev];
+            if (next.length > 120) next.pop();
+            return next;
+          });
+        } catch (err) {
+          console.warn('WS parse error', err);
+        }
+      };
     };
 
-    fetchInitialData();
-
-    const channel = supabase
-      .channel('schema-db-changes')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'radar_predictions' },
-        (payload) => {
-          setTelemetry((prev) => {
-            const updated = [payload.new, ...prev];
-            if (updated.length > 100) updated.pop();
-            return updated;
-          });
-        }
-      )
-      .subscribe((status) => {
-        setConnected(status === 'SUBSCRIBED');
-      });
+    connect();
 
     return () => {
-      supabase.removeChannel(channel);
+      if (retryTimer) clearTimeout(retryTimer);
+      if (ws) ws.close();
     };
   }, []);
 
-  const latestEvent = telemetry[0];
+  const classOrder = useMemo(() => {
+    const hasBinary = telemetry.some(e => e.class_name === 'FALL' || e.class_name === 'NO-FALL');
+    const hasMulti = telemetry.some(e => DEFAULT_CLASS_ORDER.includes(e.class_name));
+    if (hasBinary && !hasMulti) return BINARY_CLASS_ORDER;
+    return DEFAULT_CLASS_ORDER;
+  }, [telemetry]);
+
+  const latest  = telemetry[0];
   const history = telemetry.slice(1);
-  const latestCfg = latestEvent ? getClassConfig(latestEvent.class_name) : null;
-  const LatestIcon = latestCfg ? latestCfg.icon : Activity;
+  const latestCfg = latest ? cfg(latest.class_name) : null;
+  const LatestIcon = latestCfg?.icon ?? Activity;
+
+  const totalFrames = latest?.frame_count ?? 0;
+  const fallCount   = telemetry.filter(e => e.is_fall).length;
+  const avgConf     = telemetry.length ? (telemetry.reduce((s,e) => s+(e.confidence||0), 0)/telemetry.length*100).toFixed(1) : '—';
 
   return (
-    <div className="dashboard-container">
-      {/* Header */}
-      <header className="dashboard-header">
-        <div className="header-left">
-          <div className="header-logo">
-            <Radar size={28} className="logo-icon" />
-          </div>
+    <div className="app-root">
+
+      {/* ── Header ── */}
+      <header className="header">
+        <div className="header-brand">
+          <div className="brand-icon"><Radar size={26} /></div>
           <div>
-            <h1>Radar Activity Monitor</h1>
-            <p className="subtitle">Deploying Multi-Class HF Space Model &bull; Real-time Streaming</p>
+            <div className="brand-title">RadarWatch</div>
+            <div className="brand-sub">IWR6843 · Real-time Activity Monitor · AWS Rule-Based</div>
           </div>
         </div>
-        <div className={`connection-badge ${connected ? 'conn-live' : 'conn-off'} hf-badge`}>
-          {connected ? <Wifi size={14} /> : <WifiOff size={14} />}
-          {connected ? 'Live (HF Cloud)' : 'Offline'}
+        <div className={`live-badge ${connected?'on':'off'}`}>
+          {connected ? <span className="live-dot"/> : <WifiOff size={12}/>}
+          {connected ? 'Live Stream' : 'Offline'}
         </div>
       </header>
 
-      {!latestEvent ? (
-        <div className="empty-state">
-          <Activity size={64} className="empty-icon" />
+      {/* ── Stats row ── */}
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-label">Total Frames</div>
+          <div className="stat-value cyan">{totalFrames.toLocaleString()}</div>
+          <div className="stat-sub">processed</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Events Logged</div>
+          <div className="stat-value">{telemetry.length}</div>
+          <div className="stat-sub">in session</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Fall Alerts</div>
+          <div className={`stat-value ${fallCount>0?'red':'green'}`}>{fallCount}</div>
+          <div className="stat-sub">{fallCount===0?'all clear':'detected'}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Avg Confidence</div>
+          <div className="stat-value cyan">{avgConf}{telemetry.length?'%':''}</div>
+          <div className="stat-sub">model score</div>
+        </div>
+      </div>
+
+      {!latest ? (
+        <div className="empty">
+          <Radar size={72} className="empty-icon" />
           <h2>Waiting for radar stream…</h2>
-          <p>Start your RPi pipeline or simulate_sender.py</p>
+          <p>Start your RPi pipeline or run simulate_sender.py</p>
         </div>
       ) : (
         <>
-          {/* ─── CURRENT CAPTURE ────────────────────────────────────────── */}
-          <section className="latest-event-box">
-            <h2 className="section-title">CURRENT ACTIVITY</h2>
-            <div
-              className={`glass-panel featured-event featured-${latestCfg.category}`}
-              style={{
-                '--activity-color': latestCfg.color,
-                '--activity-glow': latestCfg.bgGlow,
-                '--activity-border': latestCfg.borderColor,
-              }}
-            >
-              <div className="featured-header">
-                <div className="featured-icon-wrapper">
-                  <LatestIcon size={56} />
+          {/* ── Current Activity ── */}
+          <div
+            className="activity-card glass"
+            style={{
+              '--act-color':  latestCfg.color,
+              '--act-glow':   latestCfg.glow,
+              '--act-border': latestCfg.border,
+            }}
+          >
+            <div style={{ marginBottom:12 }}>
+              <div className="section-hdr"><span>Current Activity</span></div>
+            </div>
+
+            <div className="activity-top">
+              <div className={`act-icon-wrap ${latestCfg.cat==='alert'?'alert':''}`}>
+                <LatestIcon size={40} />
+              </div>
+              <div className="act-info">
+                <div className="act-name">{latestCfg.label}</div>
+                <div className="act-badge">
+                  {latestCfg.cat==='alert' ? <AlertTriangle size={11}/> : <ShieldCheck size={11}/>}
+                  {latest.class_name}
                 </div>
-                <div className="featured-title-area">
-                  <div className="featured-title">{latestCfg.label}</div>
-                  <div className="featured-class-badge" style={{ background: latestCfg.bgGlow, color: latestCfg.color }}>
-                    {latestEvent.class_name}
-                  </div>
-                  <div className="featured-timestamp">
-                    {new Date(latestEvent.timestamp).toLocaleString()} &nbsp;&bull;&nbsp; Frame #{latestEvent.frame_count}
-                  </div>
-                </div>
-                <div className="featured-confidence">
-                  <span className="label" style={{ color: 'rgba(255,255,255,0.6)' }}>Confidence</span>
-                  <div className="conf-value" style={{ color: latestCfg.color }}>
-                    {(latestEvent.confidence * 100).toFixed(1)}%
-                  </div>
+                <div className="act-ts">
+                  {new Date(latest.timestamp).toLocaleString()} · Frame #{latest.frame_count}
                 </div>
               </div>
-
-              {/* Probability Bars */}
-              <div className="featured-probs">
-                <span className="label">Class Probabilities</span>
-                <ProbabilityChart probs={latestEvent.probs} />
-              </div>
-
-              {/* Metrics Row */}
-              <div className="featured-metrics">
-                <div className="metric">
-                  <span className="label">Points</span>
-                  <strong>{latestEvent.n_points}</strong>
-                </div>
-                <div className="metric">
-                  <span className="label">Z-Mean</span>
-                  <strong>{latestEvent.z_mean?.toFixed(3) || 'N/A'}</strong>
-                </div>
-                <div className="metric">
-                  <span className="label">Height Range</span>
-                  <strong>{latestEvent.height_range?.toFixed(3) || 'N/A'}</strong>
-                </div>
-                <div className="metric">
-                  <span className="label">X-Mean</span>
-                  <strong>{latestEvent.x_mean?.toFixed(3) || 'N/A'}</strong>
+              <div className="act-conf-block">
+                <div className="conf-label">Confidence</div>
+                <div className="conf-num">{(latest.confidence*100).toFixed(1)}%</div>
+                <div className="conf-bar-wrap">
+                  <div className="conf-bar" style={{ width:`${(latest.confidence*100).toFixed(1)}%` }}/>
                 </div>
               </div>
             </div>
-          </section>
 
-          {/* ─── ACTIVITY DISTRIBUTION ──────────────────────────────────── */}
-          <section className="distribution-section">
-            <h2 className="section-title">
-              <BarChart3 size={16} style={{ verticalAlign: 'middle', marginRight: 8 }} />
-              SESSION ACTIVITY BREAKDOWN
-            </h2>
-            <ActivityDistribution telemetry={telemetry} />
-          </section>
+            {/* Probabilities */}
+            <div className="prob-section">
+              <div className="prob-section-title">Class Probabilities</div>
+              <div className="prob-chart-wrap"><ProbChart probs={latest.probs} classOrder={classOrder} /></div>
+            </div>
 
-          {/* ─── HISTORY ────────────────────────────────────────────────── */}
-          <section className="history-section">
-            <h2 className="section-title">
-              INFERENCE HISTORY
-              <span className="history-count">{history.length} events</span>
-            </h2>
-            <div className="history-list">
-              {history.map((ev) => (
-                <EventRow key={ev.id} event={ev} />
+            {/* Metrics */}
+            <div className="metrics-row">
+              {[
+                { label:'Points',       val: latest.n_points },
+                { label:'Z-Mean (m)',   val: latest.z_mean?.toFixed(3) ?? 'N/A' },
+                { label:'Height Range', val: latest.height_range?.toFixed(3) ?? 'N/A' },
+                { label:'X-Mean (m)',   val: latest.x_mean?.toFixed(3) ?? 'N/A' },
+              ].map(m => (
+                <div className="metric-box" key={m.label}>
+                  <div className="metric-lbl">{m.label}</div>
+                  <div className="metric-val">{m.val}</div>
+                </div>
               ))}
             </div>
-          </section>
+          </div>
+
+          {/* ── Activity Distribution ── */}
+          <div className="dist-section">
+            <div className="section-hdr">
+              <span>Session Breakdown</span>
+              <span className="section-pill">{telemetry.length} events</span>
+            </div>
+            <Distribution telemetry={telemetry} classOrder={classOrder} />
+          </div>
+
+          {/* ── History ── */}
+          {history.length > 0 && (
+            <div className="history-section">
+              <div className="section-hdr">
+                <span>Inference History</span>
+                <span className="section-pill">{history.length} rows</span>
+              </div>
+              <div className="history-list">
+                {history.map((ev, i) => <HRow key={ev.id ?? i} event={ev} delay={i*25} classOrder={classOrder} />)}
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
   );
 }
-
-export default App;

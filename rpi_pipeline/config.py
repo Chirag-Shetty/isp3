@@ -14,6 +14,10 @@ SUPABASE_URL = "https://ozopcneaghprtmnfrokh.supabase.co"    # ← paste here
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96b3BjbmVhZ2hwcnRtbmZyb2toIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2NTE5NDMsImV4cCI6MjA4OTIyNzk0M30.K-Sh_vTb0h_7dIGE9pHoRXc4IbNTWaU5yZzjxYwdca8"              # ← paste here
 
 # ============================================================
+
+import os
+
+# ============================================================
 #  Radar / Serial Settings
 # ============================================================
 # Common values on Raspberry Pi:
@@ -51,6 +55,15 @@ RUN_INFERENCE = True
 # Format: https://<owner>-<space-name>.hf.space
 # Leave blank ("") to fall back to local inference on the RPi.
 INFERENCE_URL = "https://chiragshetty888-fall-detection-api.hf.space/predict"
+
+# ============================================================
+#  Cloud API (AWS rule-based streaming)
+# ============================================================
+# Endpoint for per-frame feature streaming to the AWS API.
+# Example: http://<ec2-public-ip>/frame
+CLOUD_API_URL = os.getenv("CLOUD_API_URL", "http://YOUR_EC2_IP/frame")
+DEVICE_ID = os.getenv("DEVICE_ID", "rpi-1")
+CLOUD_TIMEOUT = float(os.getenv("CLOUD_TIMEOUT", "1.5"))
 
 # ============================================================
 #  Class Labels (must match training order)
