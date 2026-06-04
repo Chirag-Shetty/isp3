@@ -162,7 +162,7 @@ export default function App() {
     const apiBase = import.meta.env.VITE_API_URL || DEFAULT_API_URL;
 
     if (apiBase) {
-      const historyUrl = `${apiBase}/history?device_id=${encodeURIComponent(deviceId)}&limit=60`;
+      const historyUrl = `${apiBase}/history?device_id=${encodeURIComponent(deviceId)}&limit=200`;
       fetch(historyUrl)
         .then(res => (res.ok ? res.json() : []))
         .then(data => {
@@ -192,7 +192,7 @@ export default function App() {
           const row = JSON.parse(evt.data);
           setTelemetry(prev => {
             const next = [row, ...prev];
-            if (next.length > 120) next.pop();
+            if (next.length > 500) next.pop();
             return next;
           });
         } catch (err) {

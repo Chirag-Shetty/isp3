@@ -175,27 +175,28 @@ async def frame(req: FrameRequest):
         "debug":       info,
     }
 
-    # Broadcast every event over WebSocket (not just falls)
+    # Broadcast ALL events over WebSocket (live feed — no filter)
     await ws_manager.broadcast(event)
 
-    # Save ALL events to DynamoDB (not just falls) so /history works
-    ttl = int(time.time()) + 86400  # 24h TTL
-    item = {
-        "device_id":   device_id,
-        "ts":          ts,
-        "pk":          "all",
-        "class_id":    event["class_id"],
-        "class_name":  event["class_name"],
-        "confidence":  ddb_num(event["confidence"]),
-        "is_fall":     bool(is_fall),
-        "z_mean":      ddb_num(feat[2]),
-        "x_mean":      ddb_num(feat[0]),
-        "y_mean":      ddb_num(feat[1]),
-        "height_range": ddb_num(feat[11]),
-        "n_points":    int(feat[9]),
-        "expire_at":   ttl,
-    }
-    table.put_item(Item=item)
+    # Save ONLY FALL events to DynamoDB
+    if is_fall:
+        ttl = int(time.time()) + 86400  # 24h TTL
+        item = {
+            "device_id":   device_id,
+            "ts":          ts,
+            "pk":          "all",
+            "class_id":    1,
+            "class_name":  "FALL",
+            "confidence":  ddb_num(conf),
+            "is_fall":     True,
+            "z_mean":      ddb_num(feat[2]),
+            "x_mean":      ddb_num(feat[0]),
+            "y_mean":      ddb_num(feat[1]),
+            "height_range": ddb_num(feat[11]),
+            "n_points":    int(feat[9]),
+            "expire_at":   ttl,
+        }
+        table.put_item(Item=item)
 
     return event
 
