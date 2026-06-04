@@ -129,7 +129,25 @@ def process_file(json_path, session, prev_velocity_ref, counters):
                 print(f"  [cloud] send failed: {exc}")
 
 
-# ── inotify watcher (instant, Linux only) ────────────────────────────────────
+def wait_for_stable_file(path, stable_ms=80, max_wait_s=15):
+    """
+    Wait until the file size stops changing — i.e. the writer has finished.
+    Polls every `stable_ms` milliseconds. Returns True when stable, False on timeout.
+    """
+    last_size = -1
+    deadline = time.time() + max_wait_s
+    while time.time() < deadline:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            time.sleep(0.05)
+            continue
+        if size > 0 and size == last_size:
+            return True   # size unchanged — file is fully written
+        last_size = size
+        time.sleep(stable_ms / 1000.0)
+    return False  # timed out
+
 
 def run_with_watchdog(watch_dir, session, prev_velocity_ref, counters, seen_files):
     """Use watchdog (inotify on Linux) for zero-delay file detection."""
@@ -160,8 +178,10 @@ def run_with_watchdog(watch_dir, session, prev_velocity_ref, counters, seen_file
                 if path in seen_files:
                     continue
                 seen_files.add(path)
-                time.sleep(0.02)   # 20ms — let the file finish writing
-                process_file(path, session, prev_velocity_ref, counters)
+                if wait_for_stable_file(path):
+                    process_file(path, session, prev_velocity_ref, counters)
+                else:
+                    print(f"  [watcher] Timed out waiting for {os.path.basename(path)} — skipping")
             except queue.Empty:
                 continue
     except KeyboardInterrupt:
