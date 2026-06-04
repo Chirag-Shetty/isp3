@@ -54,34 +54,39 @@ def read_visualizer_json(json_path: str):
         return []
 
     frames = []
+
     if isinstance(data, dict) and 'data' in data:
         for row in data['data']:
             fd = row.get("frameData", {})
             frames.append({
-                "pointCloud": fd.get("pointCloud", []),
-                "trackData":  fd.get("trackData", []),
-                "heightData": fd.get("heightData", []),
+                "pointCloud":        fd.get("pointCloud", []),
+                "trackData":         fd.get("trackData", []),
+                "heightData":        fd.get("heightData", []),
+                "numDetectedTracks": int(fd.get("numDetectedTracks", 0)),
             })
     elif isinstance(data, dict) and 'frameData' in data:
         fd = data['frameData']
         frames.append({
-            "pointCloud": fd.get("pointCloud", []),
-            "trackData":  fd.get("trackData", []),
-            "heightData": fd.get("heightData", []),
+            "pointCloud":        fd.get("pointCloud", []),
+            "trackData":         fd.get("trackData", []),
+            "heightData":        fd.get("heightData", []),
+            "numDetectedTracks": int(fd.get("numDetectedTracks", 0)),
         })
     elif isinstance(data, dict) and 'pointCloud' in data:
         frames.append({
-            "pointCloud": data.get("pointCloud", []),
-            "trackData":  data.get("trackData", []),
-            "heightData": data.get("heightData", []),
+            "pointCloud":        data.get("pointCloud", []),
+            "trackData":         data.get("trackData", []),
+            "heightData":        data.get("heightData", []),
+            "numDetectedTracks": int(data.get("numDetectedTracks", 0)),
         })
     elif isinstance(data, list):
         for item in data:
             fd = item.get("frameData", item)
             frames.append({
-                "pointCloud": fd.get("pointCloud", []),
-                "trackData":  fd.get("trackData", []),
-                "heightData": fd.get("heightData", []),
+                "pointCloud":        fd.get("pointCloud", []),
+                "trackData":         fd.get("trackData", []),
+                "heightData":        fd.get("heightData", []),
+                "numDetectedTracks": int(fd.get("numDetectedTracks", 0)),
             })
     else:
         print(f"  [watcher] Unknown JSON format in {os.path.basename(json_path)}")
@@ -109,9 +114,10 @@ def process_file(json_path, session, prev_velocity_ref, counters):
         )
 
         payload = {
-            "device_id": DEVICE_ID,
-            "timestamp": now_iso(),
-            "features":  feat.tolist(),
+            "device_id":   DEVICE_ID,
+            "timestamp":   now_iso(),
+            "features":    feat.tolist(),
+            "human_count": frame_dict.get("numDetectedTracks", 0),
         }
 
         t0 = time.perf_counter()

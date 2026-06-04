@@ -22,6 +22,7 @@ class FrameRequest(BaseModel):
     device_id: str
     timestamp: str | None = None
     features: list[float]
+    human_count: int = 0
 
 
 class WSManager:
@@ -160,7 +161,7 @@ async def frame(req: FrameRequest):
     event = {
         "device_id":   device_id,
         "ts":          ts,
-        "timestamp":   ts,           # also include 'timestamp' for frontend compatibility
+        "timestamp":   ts,
         "class_id":    1 if is_fall else 0,
         "class_name":  "FALL" if is_fall else "NO-FALL",
         "confidence":  float(conf if is_fall else p_nofall),
@@ -171,7 +172,8 @@ async def frame(req: FrameRequest):
         "n_points":    int(feat[9]),
         "x_mean":      float(feat[0]),
         "y_mean":      float(feat[1]),
-        "frame_count": 0,            # not tracked per-frame in streaming mode
+        "frame_count": 0,
+        "human_count": req.human_count,
         "debug":       info,
     }
 

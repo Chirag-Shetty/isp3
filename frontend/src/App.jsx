@@ -224,7 +224,8 @@ export default function App() {
   const totalFrames = latest?.frame_count ?? 0;
   const fallCount   = telemetry.filter(e => e.is_fall).length;
   const avgConf     = telemetry.length ? (telemetry.reduce((s,e) => s+(e.confidence||0), 0)/telemetry.length*100).toFixed(1) : '—';
-  const latestTs = latest?.timestamp || latest?.ts;
+  const latestTs    = latest?.timestamp || latest?.ts;
+  const humanCount  = latest?.human_count ?? '—';
 
   return (
     <div className="app-root">
@@ -266,6 +267,45 @@ export default function App() {
           <div className="stat-value cyan">{avgConf}{telemetry.length?'%':''}</div>
           <div className="stat-sub">model score</div>
         </div>
+      </div>
+
+      {/* ── Human Count Banner ── */}
+      <div className="human-count-banner" style={{
+        background: (humanCount > 0)
+          ? 'linear-gradient(135deg, rgba(20,184,166,0.18), rgba(6,182,212,0.10))'
+          : 'rgba(255,255,255,0.03)',
+        border: `1px solid ${humanCount > 0 ? 'rgba(20,184,166,0.5)' : 'rgba(255,255,255,0.08)'}`,
+        borderRadius: 16,
+        padding: '18px 28px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 20,
+        margin: '0 0 16px 0',
+        transition: 'all 0.4s ease',
+      }}>
+        <div style={{
+          fontSize: 42,
+          lineHeight: 1,
+          filter: humanCount > 0 ? 'drop-shadow(0 0 12px rgba(20,184,166,0.8))' : 'none',
+          transition: 'filter 0.4s',
+        }}>👤</div>
+        <div>
+          <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Humans Detected</div>
+          <div style={{
+            fontSize: '2.8rem',
+            fontWeight: 800,
+            fontFamily: 'JetBrains Mono, monospace',
+            color: humanCount > 0 ? '#14b8a6' : '#475569',
+            lineHeight: 1,
+            transition: 'color 0.4s',
+          }}>{humanCount}</div>
+        </div>
+        {humanCount > 0 && (
+          <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+            <div style={{ fontSize: '0.7rem', color: '#64748b' }}>in frame</div>
+            <div style={{ color: '#14b8a6', fontSize: '0.85rem', fontWeight: 600 }}>ACTIVE</div>
+          </div>
+        )}
       </div>
 
       {!latest ? (
