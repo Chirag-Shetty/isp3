@@ -203,6 +203,83 @@ async def frame(req: FrameRequest):
     return event
 
 
+# ── Batch endpoint: send many frames in one HTTP round-trip ──────────────────
+
+class FrameItem(BaseModel):
+    features:    list[float]
+    timestamp:   str | None = None
+    human_count: int = 0
+
+class BatchFrameRequest(BaseModel):
+    device_id: str
+    frames:    list[FrameItem]
+
+@app.post("/frames/batch")
+async def frames_batch(req: BatchFrameRequest):
+    device_id = req.device_id
+    det = detectors.get(device_id)
+    if det is None:
+        det = StreamingFallDetector()
+        detectors[device_id] = det
+
+    results = []
+    for item in req.frames:
+        if len(item.features) != 20:
+            continue
+
+        feat = np.array(item.features, dtype=np.float32)
+        ts   = item.timestamp or now_iso()
+
+        is_fall, conf, info = det.update(feat)
+
+        p_fall   = conf if is_fall else 0.05
+        p_nofall = 1.0 - p_fall
+
+        event = {
+            "device_id":    device_id,
+            "ts":           ts,
+            "timestamp":    ts,
+            "class_id":     1 if is_fall else 0,
+            "class_name":   "FALL" if is_fall else "NO-FALL",
+            "confidence":   float(conf if is_fall else p_nofall),
+            "is_fall":      bool(is_fall),
+            "probs":        [round(p_nofall, 3), round(p_fall, 3)],
+            "z_mean":       float(feat[2]),
+            "height_range": float(feat[11]),
+            "n_points":     int(feat[9]),
+            "x_mean":       float(feat[0]),
+            "y_mean":       float(feat[1]),
+            "frame_count":  0,
+            "human_count":  item.human_count,
+            "debug":        info,
+        }
+
+        await ws_manager.broadcast(event)
+
+        if is_fall:
+            ttl = int(time.time()) + 86400
+            item_db = {
+                "device_id":    device_id,
+                "ts":           ts,
+                "pk":           "all",
+                "class_id":     1,
+                "class_name":   "FALL",
+                "confidence":   ddb_num(conf),
+                "is_fall":      True,
+                "z_mean":       ddb_num(feat[2]),
+                "x_mean":       ddb_num(feat[0]),
+                "y_mean":       ddb_num(feat[1]),
+                "height_range": ddb_num(feat[11]),
+                "n_points":     int(feat[9]),
+                "expire_at":    ttl,
+            }
+            table.put_item(Item=item_db)
+
+        results.append(event)
+
+    return {"processed": len(results), "results": results}
+
+
 @app.get("/history")
 def history(device_id: str, limit: int = 60):
     resp = table.query(

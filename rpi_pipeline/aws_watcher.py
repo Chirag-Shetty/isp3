@@ -94,45 +94,46 @@ def read_visualizer_json(json_path: str):
 
 
 def process_file(json_path, session, prev_velocity_ref, counters):
-    """Extract features from every frame in a JSON file and POST to AWS."""
-    fname = os.path.basename(json_path)
+    """Extract features from every frame in a JSON file and POST as one batch to AWS."""
+    fname  = os.path.basename(json_path)
     frames = read_visualizer_json(json_path)
     if not frames:
         return
 
     counters['files'] += 1
-    print(f"\n[watcher] → {fname}  ({len(frames)} frames)")
 
+    # ── Build batch payload ───────────────────────────────────────────────────
+    batch_frames = []
     for frame_dict in frames:
         counters['frames'] += 1
         pc = frame_dict.get("pointCloud", [])
-        td = frame_dict.get("trackData", [])
+        td = frame_dict.get("trackData",  [])
         hd = frame_dict.get("heightData", [])
+        hc = frame_dict.get("numDetectedTracks", 0)
 
         feat, prev_velocity_ref[0] = extract_frame_features(
             pc, td, hd, prev_velocity_ref[0]
         )
-
-        payload = {
-            "device_id":   DEVICE_ID,
-            "timestamp":   now_iso(),
+        batch_frames.append({
             "features":    feat.tolist(),
-            "human_count": frame_dict.get("numDetectedTracks", 0),
-        }
+            "timestamp":   now_iso(),
+            "human_count": hc,
+        })
 
-        t0 = time.perf_counter()
-        try:
-            session.post(CLOUD_API_URL, json=payload, timeout=CLOUD_TIMEOUT)
-            counters['sent'] += 1
-            latency_ms = (time.perf_counter() - t0) * 1000
-            if counters['frames'] % 20 == 0:
-                print(f"  [cloud] frames={counters['frames']}  "
-                      f"sent={counters['sent']}  "
-                      f"latency={latency_ms:.0f}ms")
-        except requests.exceptions.RequestException as exc:
-            counters['errors'] += 1
-            if counters['errors'] <= 3 or counters['errors'] % 20 == 0:
-                print(f"  [cloud] send failed: {exc}")
+    # ── Send entire file as one HTTP request ──────────────────────────────────
+    batch_url = CLOUD_API_URL.replace("/frame", "/frames/batch")
+    payload   = {"device_id": DEVICE_ID, "frames": batch_frames}
+
+    t0 = time.perf_counter()
+    try:
+        session.post(batch_url, json=payload, timeout=CLOUD_TIMEOUT * 10)
+        counters['sent'] += len(batch_frames)
+        ms = (time.perf_counter() - t0) * 1000
+        print(f"  [cloud] {fname}  {len(batch_frames)} frames → 1 request  {ms:.0f}ms  "
+              f"(total sent: {counters['sent']})")
+    except requests.exceptions.RequestException as exc:
+        counters['errors'] += 1
+        print(f"  [cloud] batch send failed: {exc}")
 
 
 def wait_for_stable_file(path, stable_ms=80, max_wait_s=15):
