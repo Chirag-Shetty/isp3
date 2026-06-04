@@ -21,13 +21,10 @@ const CC = {
 };
 const DEFAULT_CLASS_ORDER = ['Standing_walk','Sitting_chair','sitting_floor','Stand_Sit_chair_transition','chair_floor_transition','stand_floor_transition'];
 const BINARY_CLASS_ORDER = ['NO-FALL','FALL'];
-const DEFAULT_WS_URL = 'ws://43.205.167.81/ws';
-const DEFAULT_API_URL = 'http://43.205.167.81';
+const EC2_IP = import.meta.env.VITE_EC2_IP || '43.205.167.81';
+const DEFAULT_WS_URL  = `ws://${EC2_IP}/ws`;
+const DEFAULT_API_URL = `http://${EC2_IP}`;
 const DEFAULT_DEVICE_ID = 'rpi-1';
-
-function isStaticHost(host) {
-  return host.includes('amazonaws.com') || host.includes('cloudfront.net');
-}
 
 function cfg(name) {
   return CC[name] || { label: name||'Unknown', icon:Activity, color:'#64748b', glow:'rgba(100,116,139,0.1)', border:'rgba(100,116,139,0.3)', cat:'safe' };
@@ -159,21 +156,10 @@ export default function App() {
   const deviceId = import.meta.env.VITE_DEVICE_ID || DEFAULT_DEVICE_ID;
 
   useEffect(() => {
-    const wsUrl = (() => {
-      if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
-      if (typeof window === 'undefined') return '';
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      const host = window.location.hostname;
-      if (host === 'localhost' || host === '127.0.0.1') return DEFAULT_WS_URL;
-      if (isStaticHost(host)) return DEFAULT_WS_URL;
-      return `${proto}://${host}/ws`;
-    })();
-
-    const apiBase = (() => {
-      if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
-      if (wsUrl) return wsUrl.replace(/^ws/, 'http').replace(/\/ws$/, '');
-      return DEFAULT_API_URL;
-    })();
+    // Always point directly at EC2 — never try to derive from window.location
+    // (frontend on S3/https would cause mixed-content blocks otherwise)
+    const wsUrl  = import.meta.env.VITE_WS_URL  || DEFAULT_WS_URL;
+    const apiBase = import.meta.env.VITE_API_URL || DEFAULT_API_URL;
 
     if (apiBase) {
       const historyUrl = `${apiBase}/history?device_id=${encodeURIComponent(deviceId)}&limit=60`;
