@@ -1,0 +1,53 @@
+# ── Security — NEVER commit ────────────────────────────
+*.pem
+*.key
+.env
+
+# ── Python cache ───────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+
+# ── Frontend build artefacts (built locally, not committed) ──
+frontend/node_modules/
+frontend/dist/
+
+# ── OS / editor ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+
+# ── Large data & model files ───────────────────────────
+Dataset1/
+dataset_26_09_25*/
+*.pth
+*.pkl
+*.ipynb
+*.zip
+
+# ── Report / presentation (not part of running system) ─
+*.pdf
+*.pptx
+Project-Report-Template-main/
+
+# ── Debug output files ─────────────────────────────────
+feat_fn_out.txt
+features_out.txt
+model_cells.txt
+nb_output.txt
+
+# ── Old / broken / redundant files ─────────────────────
+radar-api-main.py
+wipe_and_upload.py
+patch_and_upload.py
+upload_frontend.py
+inspect_checkpoint.py
+inspect_shapes.py
+read_feat_fn.py
+read_features.py
+read_model.py
+read_nb.py
+verify_model.py
+multi_class_training_colab.py
