@@ -308,5 +308,4 @@ ps aux | grep aws_watcher            # is the script running?
 
 ---
 
-*Project: Real-Time Fall Detection using Dual mmWave Radar — IDP Phase 2*  
-*Developer: Chirag Shetty*
+
