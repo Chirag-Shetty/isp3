@@ -1,0 +1,19 @@
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {3.1}{\ignorespaces End-to-end system architecture}}{16}{figure.3.1}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {4.1}{\ignorespaces End-to-end dual-radar fusion pipeline}}{25}{figure.4.1}%
+\contentsline {figure}{\numberline {4.2}{\ignorespaces RANSAC-based Auto-Calibration Convergence}}{26}{figure.4.2}%
+\contentsline {figure}{\numberline {4.3}{\ignorespaces Dual-Radar Point Cloud Fusion --- Initial Merge}}{28}{figure.4.3}%
+\contentsline {figure}{\numberline {4.4}{\ignorespaces Dual-Radar Point Cloud --- Final Fused Output}}{28}{figure.4.4}%
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {5.1}{\ignorespaces \textit {StreamingFallDetector} per-frame decision flow}}{34}{figure.5.1}%
+\contentsline {figure}{\numberline {5.2}{\ignorespaces Single-Person Point Cloud Validation: IWR6843 vs. AWR1843 vs. Fused Output}}{35}{figure.5.2}%
+\contentsline {figure}{\numberline {5.3}{\ignorespaces Real-Time Activity Dashboard}}{36}{figure.5.3}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {7.1}{\ignorespaces AWS S3-Hosted Dashboard --- Fall Alert State (66.7\% confidence, 200 events logged)}}{43}{figure.7.1}%
+\contentsline {figure}{\numberline {7.2}{\ignorespaces AWS Dashboard --- Inference History with Expanded FALL Event (Frame \#140, 90\% confidence)}}{44}{figure.7.2}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }

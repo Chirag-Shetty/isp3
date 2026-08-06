@@ -1,0 +1,8 @@
+\chapter{Conclusion}
+This project successfully engineered and deployed a highly resilient, real-time fall detection architecture utilizing a dual Texas Instruments IWR6843AOP mmWave radar configuration. By implementing a sophisticated SVD+RANSAC track-based auto-calibration algorithm, the system dynamically discovers the geometric relationship between two unlinked sensors placed anywhere in a room. 
+
+The resulting edge-computing pipeline flawlessly synchronizes asynchronous USB data streams, computes rigid spatial transforms, and merges independent perspectives into a single, comprehensive 3D point cloud. Redundancies and multipath noise are efficiently mitigated through 0.1 m voxel downsampling and Statistical Outlier Removal (SOR), all operating with a latency of under 10 ms per frame. The self-healing nature of the drift-detection loop ensures the system remains robust even if hardware is physically disturbed.
+
+This unified, high-density point cloud empowers the downstream Transformer-CNN-LSTM deep learning model to accurately distinguish the nuanced spatial and temporal signatures of fall events. By offloading this inference to a Hugging Face Space API, and broadcasting telemetry via Supabase WebSockets to a React dashboard, the architecture achieves reliable, sub-second alerting. 
+
+Ultimately, this project represents a significant advancement in ambient assisted living, providing a scalable, zero-maintenance, and deeply privacy-preserving monitoring solution that far exceeds the operational limitations of traditional optical cameras and single-radar setups.

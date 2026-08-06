@@ -1,0 +1,45 @@
+# ─── Model Configuration ─────────────────────────────────────────────────────
+model:
+  input_dim: 18           # Number of radar features per frame
+  seq_len: 30             # Temporal window length (30 radar frames @ ~10Hz = 3s window)
+  num_classes: 4          # Standing | Sitting | Walking | Fall
+  cnn_channels: 128       # CNN output channels = Transformer d_model
+  lstm_hidden: 256        # LSTM hidden dimension (×2 for bidirectional = 512)
+  dropout: 0.3
+
+# ─── Training Hyperparameters ─────────────────────────────────────────────────
+epochs: 80
+lr: 3.0e-4
+weight_decay: 1.0e-4
+batch_size: 64
+grad_clip: 1.0
+
+# ─── Scheduler (Cosine Annealing with Warm Restarts) ─────────────────────────
+scheduler:
+  T_0: 10
+  T_mult: 2
+  eta_min: 1.0e-6
+
+# ─── Data ─────────────────────────────────────────────────────────────────────
+data:
+  train_dir: "../dataset_26_09_25/train"
+  val_dir:   "../dataset_26_09_25/val"
+  test_dir:  "../dataset_26_09_25/test"
+  stride: 5
+  num_workers: 4
+  scaler_path: "checkpoints/feature_scaler.pkl"
+
+# ─── Checkpointing ───────────────────────────────────────────────────────────
+checkpoint_dir: "checkpoints"
+save_every: 5
+early_stopping_patience: 15
+
+# ─── Loss ────────────────────────────────────────────────────────────────────
+loss:
+  type: focal
+  gamma: 2.0
+  class_weights: [1.0, 1.0, 1.0, 3.0]   # Fall class weighted 3×
+
+# ─── Experiment ──────────────────────────────────────────────────────────────
+experiment_name: "transformer_cnn_lstm_v2"
+seed: 42

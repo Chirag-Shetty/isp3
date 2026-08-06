@@ -1,0 +1,20 @@
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {2.1}{\ignorespaces Key Radar Hardware Parameters}}{11}{table.2.1}%
+\contentsline {table}{\numberline {2.2}{\ignorespaces JSON Frame Fields from 3D People Tracking Firmware}}{12}{table.2.2}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {3.1}{\ignorespaces AWS Services Used in the Radar Fall Detection System}}{22}{table.3.1}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {4.1}{\ignorespaces Summary of the Dual-Radar Fusion Pipeline}}{29}{table.4.1}%
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {5.1}{\ignorespaces 20-Dimensional Feature Vector Extracted per Radar Frame}}{31}{table.5.1}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces Key Fields of the \texttt {/frames/batch} API Endpoint}}{32}{table.5.2}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces \textit {StreamingFallDetector} Three-Test Majority Vote Criteria}}{33}{table.5.3}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {table}{\numberline {7.1}{\ignorespaces Comparison of Dual-Radar Calibration Approaches}}{41}{table.7.1}%
+\contentsline {table}{\numberline {7.2}{\ignorespaces Comparison: Rule-Based vs.\ Transformer-CNN-LSTM Fall Detector}}{42}{table.7.2}%
+\contentsline {table}{\numberline {7.3}{\ignorespaces End-to-End Latency Budget}}{42}{table.7.3}%
+\contentsline {table}{\numberline {7.4}{\ignorespaces Summary of System Validation Results}}{46}{table.7.4}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }

@@ -1,0 +1,143 @@
+\chapter{Introduction}
+
+
+
+The following chapter presents the background, motivation, and scope of this interdisciplinary project. It begins by contextualizing the healthcare problem of elderly falls and the shortcomings of existing detection technologies, then formalizes the problem statement, states the project objectives, and describes the organization of the remainder of this report. 
+
+\section{Introduction}
+
+Real-time automated fall detection is a critical requirement in modern healthcare, geriatric care, and ambient assisted living (AAL). Falls represent the leading cause of both fatal and non-fatal injuries among elderly adults worldwide. According to the World Health Organization (WHO), approximately 684,000 fatal falls occur each year globally, making falls the second leading cause of unintentional injury death after road traffic injuries. Among adults aged 60 years or older, falls are the leading cause of injury and death from injury. In India, the rapidly ageing population creates an urgent and growing demand for scalable, affordable, and non-intrusive monitoring solutions that can detect falls in real time and notify caregivers or emergency services without delay. 
+
+The clinical and economic consequences of a fall extend well beyond the initial physical injury. A significant proportion of elderly individuals who fall but are not quickly discovered experience what is clinically termed a ``long lie''---a prolonged period spent on the ground before receiving assistance, which dramatically worsens prognosis through dehydration, pressure sores, hypothermia, rhabdomyolysis, and severe psychological trauma. 
+
+
+Long-lie episodes of even one hour are associated with significantly increased short-term mortality. Rapid detection and emergency response can therefore significantly reduce associated mortality and morbidity, making 
+
+
+
+
+
+
+
+automated fall detection systems a meaningful and important intervention in elder care infrastructure. 
+
+This project implements a privacy-preserving fall detection system utilizing two independent 60 GHz FMCW mmWave radar sensors: a Texas Instruments AWR6843AOP (automotive-grade) and an IWR6843AOP (industrial-grade). The mmWave radar modality was chosen because it generates only abstract 3D point clouds rather than any identifiable visual imagery, making it uniquely suited to deployment in privacy-sensitive locations such as bedrooms and bathrooms. The system is designed from the ground up to be deployable in real-world domestic environments without any specialized installation expertise, manual calibration procedures, or dedicated network infrastructure. 
+
+\section{Literature Review}
+
+A substantial body of literature addresses the fall detection problem using diverse sensing modalities. The major approaches reported in the literature are wearable sensors, visionbased systems, pressure-sensitive floors, and ambient radio-frequency (RF) sensing, each with distinct advantages and limitations. 
+
+\textbf{Wearable Sensor Approaches:} Inertial measurement units (IMUs), accelerometers, and gyroscopes embedded in smartwatches or purpose-built pendants represent the most widely deployed commercial approach. Bourke and Lyons [1] demonstrated that thresholdbased classifiers on tri-axial accelerometer data can achieve high sensitivity for simulated falls in controlled conditions. However, compliance is a critical limitation: elderly individuals, particularly those with cognitive impairment, may forget or refuse to wear the device---precisely during the activities (bathing, night movement) when falls are most likely. A device worn inconsistently provides no protection during the periods of noncompliance. 
+
+\textbf{Camera-Based Approaches:} Vision-based systems using RGB, depth (RGB-D), or thermal cameras offer high spatial resolution and can leverage deep learning for accurate activity classification. Noury et al. [2] reviewed numerous vision-based fall detection 
+
+
+approaches and demonstrated high accuracy in structured environments. However, deployment of cameras in bedrooms or bathrooms is unacceptable to most individuals due to severe privacy concerns. Camera-based algorithms also fail under poor or zero lighting and are sensitive to occlusion by furniture. 
+
+\textbf{Radar-Based Approaches:} RF sensing using Wi-Fi, Ultra-Wideband (UWB), or mmWave radar has attracted increasing research interest. mmWave FMCW radar, operating in the 60--64 GHz band, offers unique advantages: privacy-preserving point cloud output (no identifiable visual information), operation independent of ambient lighting, and penetration through light physical obstructions. Jokanovic et al. [3] demonstrated that micro-Doppler signatures from 77 GHz FMCW radar can discriminate falls from activities of daily living using machine learning classifiers. 
+
+\textbf{Multi-Sensor Fusion:} Combining multiple sensors to eliminate blind spots and improve robustness has been explored in several contexts. Point cloud registration algorithms such as Iterative Closest Point (ICP) [4] and SVD-based Procrustes alignment [5] provide principled mathematical frameworks for spatial registration. RANSAC [6] enables robust estimation in the presence of outliers, a critical property for mmWave radar which generates sparse and noisy point clouds compared to LiDAR. The application of these established algorithms to the specific challenge of dual-radar auto-calibration for fall detection is novel and constitutes the core contribution of this work. 
+
+\textbf{Cloud-Edge Architectures for IoT Health Monitoring:} The deployment of health monitoring systems on AWS or similar cloud platforms has been documented extensively. FastAPI [7], DynamoDB, and WebSocket-based real-time notification patterns provide well-established primitives for building low-latency health alert systems. 
+
+The review reveals a gap: existing radar-based fall detection systems either require a single radar (susceptible to blind spots) or multiple radars with manual calibration (brittle and maintenance-intensive). No published work addresses the automatic, online calibration of multiple mmWave radars using only their tracking output in a real-time streaming context. This gap motivates the auto-calibration pipeline presented in this report. 
+
+
+\section{Motivation}
+
+A single radar sensor can suffer from occlusion or a limited field of view in complex room geometries with furniture, corners, or partitioned spaces. A person who falls behind a large piece of furniture or in a corner not covered by the sensor's field of view would go undetected. Utilizing a dual-radar configuration ensures comprehensive room coverage and eliminates sensor blind spots that would allow a fall to go undetected. 
+
+However, the core challenge in a dual-radar system is combining detections from two radars that report positions relative to their own distinct, independent coordinate frames into a single coherent spatial representation. Manual calibration---physically measuring sensor placement with tape measures and protractors---is error-prone and brittle: angular measurement errors of 2--3 degrees produce positional errors of approximately 35 cm at 10 m range. More critically, manual calibration breaks silently whenever a sensor is inadvertently nudged, tilted, or repositioned---undetectable without repeating the entire measurement process. In a real domestic deployment, sensors may be moved during room cleaning, furniture rearrangement, or by children, rendering the calibration invalid. 
+
+A self-calibrating pipeline that continuously monitors calibration quality and can autonomously recalibrate when sensor displacement is detected would make the system truly deployable and maintenance-free for non-technical users. This operational resilience is the primary motivation for the auto-calibration approach developed in this project. 
+
+Furthermore, the choice of a rule-based fall detector over a machine-learning model is motivated by the absence of a labelled training dataset and the need for immediate deployability. A deterministic, physics-grounded classifier requires no training data, executes with sub-millisecond latency on any CPU, and is fully interpretable---all critical properties for a safety-critical system where false negatives (missed falls) and false positives (spurious alerts) both carry real consequences. 
+
+\section{Problem Statement}
+
+The two radar units operate on independent internal clocks with no hardware synchronization signal between them. Each unit delivers frames to the host at slightly different absolute times. Naively combining their frames produces temporal mismatch and spatial 
+
+
+distortion: a person walking at 1 m/s moves approximately 4 cm per 40 ms offset--- sufficient to corrupt geometric calibration and introduce ghost detections in the fused point cloud. Furthermore, the two sensors are placed at arbitrary positions and orientations in a room, so their coordinate systems are related by an unknown 6-degrees-offreedom (6-DOF) rigid body transformation that must be determined automatically. 
+
+The problem is to design an end-to-end edge-to-cloud architecture that: 
+
+- (1) \textbf{Synchronizes} incoming frames via timestamps to eliminate temporal mismatch between the two unsynchronized sensors; 
+
+- (2) \textbf{Auto-calibrates} by mathematically deducing the rigid spatial transform between the sensors using only their observed tracking output, requiring no manual measurement; 
+
+- (3) \textbf{Fuses and cleans} the resulting point clouds to produce a high-quality unified 3D representation free of duplicates and noise; 
+
+- (4) \textbf{Autonomously detects and corrects} sensor displacement-induced calibration drift without human intervention; 
+
+- (5) \textbf{Classifies} each fused frame using a deterministic, rule-based fall detector that evaluates physical signatures of a fall event; and 
+
+- (6) \textbf{Delivers} binary fall/no-fall decisions to a remote dashboard with sub-400 ms endto-end latency. 
+
+\section{Objectives}
+
+The specific technical objectives of this project are: 
+
+1. Design a dual-radar synchronization module based on nearest-timestamp frame matching, capable of pairing frames from two unsynchronized USB serial streams at approximately 10 FPS each. 
+
+2. Implement a track-based auto-calibration pipeline using SVD and RANSAC to dynamically compute the rigid transform ( \textit{R, t} ) between sensors from a brief calibration walk of 20--30 s, without any external measurement tools. 
+
+
+3. Fuse and clean the unified point cloud using voxel downsampling at 0.1 m resolution and Statistical Outlier Removal with \textit{K} = 5 nearest neighbours to produce a denoised, deduplicated representation. 
+
+4. Deploy a stateful, deterministic rule-based fall detector ( \textit{StreamingFallDetector} ) on AWS EC2 that evaluates three complementary physical signatures of a fall event per radar frame using a majority vote mechanism. 
+
+5. Persist confirmed fall events in AWS DynamoDB and broadcast all inference results via WebSocket to a React dashboard hosted on AWS S3, achieving sub-400 ms endto-end latency. 
+
+6. Design and document a Transformer-CNN-LSTM deep learning architecture as a future upgrade path for enhanced classification accuracy, compatible with the same 20-dimensional feature vector produced by the edge pipeline. 
+
+7. Evaluate the complete system with respect to latency, calibration accuracy, fusion quality, and detection logic correctness. 
+
+\section{Brief Methodology of the Project}
+
+The project follows a three-tier architecture: an edge tier on the Raspberry Pi for realtime sensor reading, synchronization, auto-calibration, fusion, and feature extraction; a cloud inference tier on AWS EC2 for rule-based fall classification and persistence; and a presentation tier on AWS S3 for the real-time React dashboard. 
+
+The auto-calibration methodology involves collecting point-cloud correspondences from a brief calibration walk, computing the optimal rotation matrix \textit{R} via Singular Value Decomposition of the cross-covariance matrix of correspondence pairs, and computing the translation vector \textit{t} analytically. RANSAC is applied to reject outlier correspondences before the final SVD pass. The resulting ( \textit{R, t} ) is applied per-frame to transform all Radar B points into Radar A's coordinate frame. 
+
+Fall classification uses three deterministic threshold tests on the 20-dimensional feature vector extracted from each fused frame: a centroid height drop test, a body flatness test, and a point count test. A majority vote of at least 2 of 3 tests triggers a FALL 
+
+
+classification. 
+
+\section{Assumptions Made / Constraints of the Project}
+
+The following assumptions and constraints apply to this project: 
+
+- Both radars are rigidly mounted during operation; the rigid body assumption underlying the SVD calibration holds as long as sensors are not moved. 
+
+- The calibration environment contains a single walking person during the calibration period to avoid correspondence ambiguity. 
+
+- The environment is assumed to be quasi-static (no large moving objects other than the monitored person) during normal operation. 
+
+- The edge device (Raspberry Pi) maintains a continuous network connection to AWS EC2 for batch uploads; occasional brief disconnections can be tolerated by retrying the HTTP POST. 
+
+- The rule-based fall detector is calibrated for a single person in the monitored space; multi-person scenarios are flagged as a limitation for future work. 
+
+- The system is designed for indoor use in domestic environments; outdoor or highly metallic environments may alter the radar's multipath characteristics. 
+
+\section{Organization of the Report}
+
+The remainder of this report is organized as follows: 
+
+\begin{itemize}
+    \item \textbf{Chapter 2:} Hardware and Data Fundamentals describes the dual-sensor hardware configuration, the 3D People Tracking firmware, and the structure of the JSON frame output from each sensor.
+
+    \item \textbf{Chapter 3:} System Architecture Overview presents the complete three-tier end-to-end pipeline from sensor capture to dashboard visualization, and describes inter-tier communication protocols and deployment infrastructure.
+
+    \item \textbf{Chapter 4:} Dual-Radar Fusion Pipeline details the complete real-time synchronization, auto-calibration (SVD+RANSAC), drift detection, point cloud fusion, voxel downsampling, and Statistical Outlier Removal stages.
+
+    \item \textbf{Chapter 5:} Feature Extraction and Fall Detection covers the 20-dimensional feature vector definition, the cloud inference infrastructure, the rule-based \textit{StreamingFallDetector} and its three-test majority vote, and the real-time React dashboard.
+
+    \item \textbf{Chapter 6:} Deep Learning Architecture documents the Transformer-CNN-LSTM upgrade path designed for future deployment when labelled data becomes available.
+
+    \item \textbf{Chapter 7:} System Evaluation and Results presents algorithm comparisons, infrastructure design decisions, and the end-to-end latency budget.
+
+    \item \textbf{Chapter 8:} Conclusion and Future Scope summarizes contributions, discusses limitations, and proposes directions for future work.
+
+    \item \textbf{Appendix A:} Raspberry Pi UART Parser Architecture describes the asynchronous two-thread parser architecture for TLV binary frame decoding from USB serial.
+\end{itemize}

@@ -1,0 +1,32 @@
+\chapter{Hardware and Data Fundamentals}
+This chapter delves into the operational parameters of the mmWave sensors, the firmware configurations, and the anatomy of the data frames used for fusion.
+
+\section{Hardware: Dual IWR6843AOP FMCW Radars}
+The primary sensors utilized are two Texas Instruments IWR6843AOP (Antenna-on-Package) radar units. They operate in the 60–64 GHz Frequency Modulated Continuous Wave (FMCW) spectrum. This frequency enables the detection of minute motions and provides adequate spatial resolution.
+
+\subsection{Radar Configuration}
+Each radar is equipped with a 3 Transmit (TX) and 4 Receive (RX) MIMO antenna array, enabling 3D angle-of-arrival estimation. The on-chip DSP executes all signal processing internally—including FFT, CFAR detection, DBSCAN clustering, and Kalman-based person tracking. Data is streamed over a standard USB port at approximately 921,600 baud. The frame rate is set to approximately 10 frames per second (100 ms frame period), which provides adequate temporal resolution for fall detection.
+
+\subsection{Firmware: 3D People Tracking}
+The sensors are flashed with the '3D People Tracking' firmware. This firmware outputs structured per-person detections alongside the raw point cloud. By shifting the computational burden of clustering and tracking to the sensor's DSP, the host edge device is freed to focus exclusively on multi-sensor fusion and feature extraction.
+
+\section{Understanding Sensor Output: The JSON Frame}
+Each frame emitted by the sensors is parsed into a structured JSON format. Understanding this structure is essential for the downstream fusion pipeline.
+
+\subsection{Anatomy of a Single Frame}
+The parsed frame contains several critical arrays and fields:
+\begin{table}[H]
+\centering
+\caption{JSON Frame Fields from 3D People Tracking Firmware}
+\label{tab:json_frame}
+\begin{tabular}{|l|l|p{8cm}|}
+\hline
+\textbf{JSON Field} & \textbf{Type} & \textbf{Description} \\ \hline
+\texttt{timestamp} & Float (s) & Wall-clock time when the frame was received; crucial for synchronization. \\ \hline
+\texttt{pointCloud} & Array & Individual radar reflection points containing \texttt{x, y, z, velocity, snr}. \\ \hline
+\texttt{targets} & Array & Tracked persons containing a stable \texttt{tid} and estimated centroid \texttt{x, y, z}. \\ \hline
+\end{tabular}
+\end{table}
+
+\subsection{Point Cloud vs. Targets}
+While the \texttt{targets} array provides a clean, smooth centroid estimate ideal for geometric calibration, it discards critical body-shape information. A fall is characterized by a rapid change in the spatial spread of the point cloud—transitioning from a tall, narrow profile to a wide, low profile. Therefore, the calibration module utilizes the \texttt{targets} centroids for robust spatial alignment, while the downstream deep learning model analyzes the fully fused \texttt{pointCloud} array to accurately classify fall dynamics.

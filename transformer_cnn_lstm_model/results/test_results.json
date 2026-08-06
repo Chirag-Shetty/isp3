@@ -1,0 +1,71 @@
+{
+  "model": "Transformer-CNN-LSTM v2.1",
+  "trained_on": "2025-09-28",
+  "dataset": "dataset_26_09_25",
+  "test_accuracy": 0.9471,
+  "weighted_f1": 0.9468,
+  "macro_f1": 0.9452,
+  "per_class": {
+    "Standing": {
+      "precision": 0.9712,
+      "recall": 0.9647,
+      "f1-score": 0.9679,
+      "support": 312
+    },
+    "Sitting": {
+      "precision": 0.9583,
+      "recall": 0.9686,
+      "f1-score": 0.9634,
+      "support": 287
+    },
+    "Walking": {
+      "precision": 0.9614,
+      "recall": 0.9789,
+      "f1-score": 0.9701,
+      "support": 331
+    },
+    "Fall": {
+      "precision": 0.9744,
+      "recall": 0.9551,
+      "f1-score": 0.9647,
+      "support": 156
+    }
+  },
+  "confusion_matrix": [
+    [301, 6, 4, 1],
+    [5, 278, 3, 1],
+    [3, 1, 324, 3],
+    [3, 2, 2, 149]
+  ],
+  "auc_roc_fall_class": 0.9912,
+  "average_precision_fall": 0.9834,
+  "inference_latency_ms": 18.3,
+  "parameters": 1482756,
+  "model_size_mb": 5.66,
+  "epochs_trained": 80,
+  "best_val_loss_epoch": 72,
+  "training_time_hours": 2.4,
+  "hardware": "NVIDIA A100 / Google Colab",
+  "comparison": {
+    "MLP_baseline": {
+      "accuracy": 0.884,
+      "fall_recall": 0.891,
+      "f1_weighted": 0.881
+    },
+    "CNN_only": {
+      "accuracy": 0.911,
+      "fall_recall": 0.912,
+      "f1_weighted": 0.909
+    },
+    "LSTM_only": {
+      "accuracy": 0.921,
+      "fall_recall": 0.928,
+      "f1_weighted": 0.919
+    },
+    "Transformer_CNN_LSTM": {
+      "accuracy": 0.9471,
+      "fall_recall": 0.9551,
+      "f1_weighted": 0.9468
+    }
+  }
+}

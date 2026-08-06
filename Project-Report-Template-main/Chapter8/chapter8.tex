@@ -1,0 +1,45 @@
+\chapter{Conclusion and Future Scope}
+
+
+
+\section{Conclusion}
+
+This report has presented a resilient, real-time fall detection system utilizing a heterogeneous dual mmWave radar configuration (AWR6843AOP + IWR6843AOP). The system addresses a critical healthcare need with a novel combination of auto-calibrating sensor fusion, deterministic rule-based classification, and a scalable cloud-to-browser data pipeline. 
+
+The SVD+RANSAC auto-calibration pipeline dynamically discovers the 6-DOF geometric relationship between two independently placed sensors, eliminating the need for manual measurement entirely. Operators need only walk through the room for approximately 25 seconds; the system autonomously computes the rigid body transform and immediately produces a unified 3D point cloud. The self-healing drift detection loop preserves calibration validity even when sensors are physically disturbed, with no human intervention required. 
+
+The \textit{StreamingFallDetector} evaluates three physical fall signatures using a deterministic majority vote rule, achieving sub-millisecond inference time with full interpretability and zero training data requirement. This rule-based approach represents an engineering judgment that prioritizes immediate deployability, full interpretability, and zero data requirements over marginal accuracy gains on edge cases. Confirmed fall events are persisted in AWS DynamoDB and broadcast to a React dashboard via WebSocket, achieving sub-400 ms end-to-end latency from sensor capture to dashboard alert. 
+
+
+\section{Future Scope}
+
+- \textbf{Labelled Dataset Collection:} Systematic data collection with safe fall simulation by volunteers to enable training and deployment of the designed Transformer-CNNLSTM model. 
+
+- \textbf{Multi-Person Detection:} Per-person track segmentation using `TLV\textit{TRACK}INDEX` to handle multi-person environments independently. 
+
+- \textbf{HTTPS and Authentication:} TLS, API key or OAuth authentication, and privacy controls for production deployment. 
+
+- \textbf{Edge Deployment of Inference:} Running the rule-based or trained model directly on the Raspberry Pi to eliminate cloud dependency and reduce latency. 
+
+- \textbf{Quantitative Performance Evaluation:} Systematic sensitivity/specificity measurement across multiple subjects, fall types, and room configurations. 
+
+- \textbf{Battery and Low-Power Operation:} A battery-backed, lower-power variant of the edge device for locations without reliable mains power. 
+
+\section{Learning Outcomes of the Project}
+
+Through this interdisciplinary project, the team gained hands-on experience with: 
+
+- FMCW mmWave radar signal processing, TLV binary parsing, and on-chip DSP firmware (Texas Instruments lab0012); 
+
+- 3D point cloud processing algorithms including SVD, RANSAC, voxel downsampling, and Statistical Outlier Removal; 
+
+- Embedded edge computing on the Raspberry Pi with real-time multi-threaded Python pipelines; 
+
+- AWS cloud deployment (EC2, DynamoDB, S3 static hosting) and FastAPI microservice development with Docker; 
+
+- Real-time browser communication via WebSocket and React front-end development; 
+
+
+- Deep learning architecture design (Transformer, CNN, LSTM) for time-series classification. 
+
+

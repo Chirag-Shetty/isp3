@@ -1,0 +1,33 @@
+\chapter{Introduction}
+This chapter provides an overview of the motivation, objectives, and high-level architecture of the real-time dual-radar fall detection system.
+
+\section[Introduction]{\textbf{Introduction}}
+Real-time automated fall detection is a critical requirement in modern healthcare and ambient assisted living. This project implements an advanced, privacy-preserving fall detection system utilizing two independent Texas Instruments IWR6843AOP FMCW mmWave radar sensors. Unlike optical cameras, mmWave radars function independently of ambient lighting, penetrate light physical obstructions, and completely preserve user privacy by eliminating visual identification. 
+
+The core challenge addressed by this project is combining detections from two radars in real time. Because the radars have no concept of each other and report positions relative to their own distinct coordinate frames, we must teach them to agree on a shared coordinate system. This project implements a completely automated pipeline that discovers the geometric relationship between the radars, fuses their point clouds, and delivers a single, clean 3D output frame for downstream fall detection inference.
+
+\section[Motivation]{\textbf{Motivation}}
+Falls are a leading cause of fatal and non-fatal injuries among the elderly. Rapid detection and emergency response can drastically reduce mortality rates. While a single radar provides excellent privacy and robustness, it can suffer from occlusion or limited field-of-view in complex environments. Utilizing a dual-radar system ensures comprehensive room coverage. However, manually calibrating two sensors is error-prone and brittle—if a sensor is bumped, manual calibration breaks. A self-calibrating, fusion-based radar system provides continuous, non-intrusive, and resilient monitoring.
+
+\section[Problem Statement]{\textbf{Problem Statement}}
+The primary challenge is spatial and temporal alignment. The two IWR6843AOP units are independent, lacking hardware synchronization. Naively combining their frames results in temporal mismatch and spatial distortion. The problem is to design an edge-computing architecture that synchronizes incoming frames via timestamps, mathematically deduces the rigid transform (rotation and translation) between the sensors using only their observed data, and merges the point clouds seamlessly. Furthermore, if a sensor drifts or is moved, the system must detect this and recalibrate without any human intervention.
+
+\section[Objectives]{\textbf{Objectives}}
+The primary objectives of this project are:
+\begin{enumerate}
+\item To design a dual-radar synchronization module that pairs frames based on nearest-timestamp matching.
+\item To implement a track-based auto-calibration pipeline utilizing SVD and RANSAC to compute the rigid transform between the sensors dynamically.
+\item To fuse the transformed point clouds and clean the unified output using voxel downsampling and Statistical Outlier Removal (SOR).
+\item To feed the unified 3D point cloud into a sophisticated Transformer-CNN-LSTM deep learning model specialized in binary fall classification.
+\item To deploy a three-tier architecture utilizing a Raspberry Pi for edge fusion, Hugging Face Spaces for cloud inference, and a live React-based dashboard for real-time alerting.
+\end{enumerate}
+
+\section[Organization of the Report]{\textbf{Organization of the Report}}
+This report is organized as follows:
+\begin{itemize}
+\item \textbf{Chapter 2} discusses the hardware configuration of the IWR6843AOP radars and the interpretation of the JSON output frames.
+\item \textbf{Chapter 3} details the system design, specifically the frame synchronization, SVD+RANSAC auto-calibration, and point cloud fusion pipeline.
+\item \textbf{Chapter 4} elaborates on the implementation of the downstream Transformer-CNN-LSTM deep learning model.
+\item \textbf{Chapter 5} covers alternative algorithm comparisons, cloud inference, database telemetry, and the frontend dashboard.
+\item \textbf{Chapter 6} provides a concluding summary of the project's achievements.
+\end{itemize}

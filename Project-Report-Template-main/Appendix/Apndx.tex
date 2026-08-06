@@ -1,0 +1,14 @@
+\chapter{Supplementary Technical Details}
+\section{Raspberry Pi UART Data Parser Architecture}
+
+The raw telemetry from the IWR6843AOP radar is transmitted over a high-speed 921,600 baud UART stream. To prevent the data stream from bottlenecking the edge device, asynchronous parsing is implemented using a dedicated background thread.
+
+The radar transmits data in consecutive frames, beginning with an 8-byte synchronization \texttt{MAGIC\_WORD} (\verb|\x02\x01\x04\x03\x06\x05\x08\x07|). Following synchronization, a 32-byte header is extracted to determine the payload length and object count. The payload utilizes a binary Type-Length-Value (TLV) encoding scheme. The parser decodes the following core TLV structures:
+
+\begin{itemize}
+    \item \textbf{Point Cloud (\texttt{TLV\_POINT\_CLOUD}):} Extracts the $X, Y, Z$ Cartesian coordinates, Doppler velocity, and Signal-to-Noise Ratio (SNR) for every detected reflection.
+    \item \textbf{Track Data (\texttt{TLV\_TRACK\_3D}):} Extracts the $X, Y, Z$ centroids and volumetric bounding box dimensions representing tracked human targets.
+    \item \textbf{Track Index (\texttt{TLV\_TRACK\_INDEX}):} Maps individual reflection points back to their corresponding tracked target.
+\end{itemize}
+
+The parsed dictionaries are accumulated in a buffer and asynchronously flushed to disk or forwarded to the Hugging Face Space inference pipeline to ensure the system consistently meets real-time latency constraints.
